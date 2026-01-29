@@ -52,8 +52,12 @@ class TradingStrategyPDF(FPDF):
         """Add a bullet point."""
         self.set_font('Arial', '', 11)
         self.set_text_color(0, 0, 0)
-        self.cell(10, 6, '-', 0, 0)
-        self.multi_cell(0, 6, text)
+        # Use a fixed left margin instead of cell + multi_cell
+        current_x = self.get_x()
+        current_y = self.get_y()
+        self.set_xy(current_x + 10, current_y)  # Indent 10 units
+        self.multi_cell(0, 6, f"- {text}")
+
 
 
 def generate_strategy_documentation():
