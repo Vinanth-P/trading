@@ -1,19 +1,59 @@
 """
-Data fetcher module for retrieving equity data from the API.
+Data fetcher module for retrieving equity data from HACKATHON DATASET.
+
+⚠️ IMPORTANT - HACKATHON RULES:
+- Must use ONLY the customized dataset provided by organizers
+- External datasets (Yahoo Finance, etc.) are NOT permitted
+- Paste your dataset link in HACKATHON_DATASET_URL below
+
+HOW TO USE:
+1. When you receive the dataset link, paste it in HACKATHON_DATASET_URL
+2. The fetcher will automatically load from that URL
+3. If URL not set, sample data is used for TESTING ONLY
 """
 import requests
 import pandas as pd
+import numpy as np
 from datetime import datetime
 from typing import List, Optional
-import json
+from io import StringIO
 
 
-class EquityDataFetcher:
-    """Fetch equity data from the provided API endpoint."""
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║  PASTE YOUR HACKATHON DATASET LINK BELOW                                      ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
+
+HACKATHON_DATASET_URL = "http://13.201.224.23:8001/"
+
+# Alternative: Local file path (if dataset is downloaded)
+HACKATHON_DATASET_FILE = None  # ← OR paste local path (e.g., "C:/hackathon/equity_data.csv")
+
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+
+
+class HackathonDataFetcher:
+    """
+    Fetch equity data from the HACKATHON-PROVIDED dataset.
     
-    def __init__(self, base_url: str = "http://13.201.224.23:8001"):
-        self.base_url = base_url
+    ⚠️ NO external data sources allowed per hackathon rules.
+    """
+    
+    def __init__(
+        self, 
+        dataset_url: Optional[str] = None,
+        dataset_file: Optional[str] = None
+    ):
+        """
+        Initialize fetcher with hackathon dataset source.
         
+        Args:
+            dataset_url: URL to hackathon dataset (CSV/JSON)
+            dataset_file: Local file path to downloaded dataset
+        """
+        self.dataset_url = dataset_url or HACKATHON_DATASET_URL
+        self.dataset_file = dataset_file or HACKATHON_DATASET_FILE
+        self._cached_data: Optional[pd.DataFrame] = None
+    
     def fetch_equity_data(
         self, 
         symbols: List[str], 
@@ -22,91 +62,193 @@ class EquityDataFetcher:
         interval: str = "1d"
     ) -> pd.DataFrame:
         """
-        Fetch equity data for given symbols and date range.
+        Fetch equity data for given symbols from hackathon dataset.
         
         Args:
             symbols: List of stock symbols (e.g., ['RELIANCE', 'TCS'])
             start_date: Start date in 'YYYY-MM-DD' format
             end_date: End date in 'YYYY-MM-DD' format
-            interval: Data interval (default: '1d' for daily)
+            interval: Data interval (ignored - using provided data granularity)
             
         Returns:
             DataFrame with columns: Date, Symbol, Open, High, Low, Close, Volume
         """
+        # Load full dataset (cached after first load)
+        full_data = self._load_hackathon_data()
+        
+        # If no hackathon data, generate sample data for testing
+        if full_data.empty:
+            return self._generate_sample_data_for_symbols(symbols, start_date, end_date)
+        
+        # Filter by symbols
+        if 'Symbol' in full_data.columns:
+            filtered = full_data[full_data['Symbol'].isin(symbols)].copy()
+        else:
+            # If no Symbol column, assume single-stock dataset
+            filtered = full_data.copy()
+            if symbols:
+                filtered['Symbol'] = symbols[0]
+        
+        # Ensure Date column is datetime
+        if 'Date' in filtered.columns:
+            filtered['Date'] = pd.to_datetime(filtered['Date'])
+        elif 'date' in filtered.columns:
+            filtered['Date'] = pd.to_datetime(filtered['date'])
+            filtered = filtered.drop(columns=['date'])
+        
+        # Filter by date range
+        start = pd.to_datetime(start_date)
+        end = pd.to_datetime(end_date)
+        filtered = filtered[(filtered['Date'] >= start) & (filtered['Date'] <= end)]
+        
+        # Standardize column names
+        filtered = self._standardize_columns(filtered)
+        
+        # Sort and return
+        filtered = filtered.sort_values(['Symbol', 'Date']).reset_index(drop=True)
+        
+        if filtered.empty:
+            print(f"⚠️ No data found for symbols {symbols} in date range {start_date} to {end_date}")
+            print("   Falling back to sample data for TESTING purposes...")
+            return self._generate_sample_data_for_symbols(symbols, start_date, end_date)
+        
+        print(f"✅ Loaded {len(filtered)} records for {filtered['Symbol'].nunique()} symbols")
+        return filtered
+    
+    def _load_hackathon_data(self) -> pd.DataFrame:
+        """
+        Load data from hackathon source (URL or file).
+        
+        Priority:
+        1. Cached data (if already loaded)
+        2. URL (HACKATHON_DATASET_URL)
+        3. Local file (HACKATHON_DATASET_FILE)
+        4. Sample data (for testing only - NOT for submission!)
+        """
+        # Return cached data if available
+        if self._cached_data is not None:
+            return self._cached_data
+        
+        # Try loading from URL
+        if self.dataset_url:
+            try:
+                print(f"📥 Loading hackathon dataset from URL...")
+                self._cached_data = self._load_from_url(self.dataset_url)
+                print(f"✅ Loaded {len(self._cached_data)} records from hackathon URL")
+                return self._cached_data
+            except Exception as e:
+                print(f"❌ Error loading from URL: {e}")
+        
+        # Try loading from local file
+        if self.dataset_file:
+            try:
+                print(f"📥 Loading hackathon dataset from file...")
+                self._cached_data = self._load_from_file(self.dataset_file)
+                print(f"✅ Loaded {len(self._cached_data)} records from local file")
+                return self._cached_data
+            except Exception as e:
+                print(f"❌ Error loading from file: {e}")
+        
+        # No hackathon data available - use sample data for TESTING only
+        print("=" * 60)
+        print("⚠️  WARNING: HACKATHON DATASET NOT CONFIGURED!")
+        print("=" * 60)
+        print("   Paste your dataset link in data/fetcher.py:")
+        print("   HACKATHON_DATASET_URL = 'your_link_here'")
+        print("")
+        print("   Using SAMPLE DATA for testing purposes only.")
+        print("   This is NOT valid for hackathon submission!")
+        print("=" * 60)
+        
+        return pd.DataFrame()  # Empty - will trigger sample data generation
+    
+    def _load_from_url(self, url: str) -> pd.DataFrame:
+        """Load dataset from URL (supports CSV and JSON)."""
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        
+        content_type = response.headers.get('content-type', '')
+        
+        if 'json' in content_type or url.endswith('.json'):
+            return pd.DataFrame(response.json())
+        else:
+            # Assume CSV
+            return pd.read_csv(StringIO(response.text))
+    
+    def _load_from_file(self, filepath: str) -> pd.DataFrame:
+        """Load dataset from local file."""
+        if filepath.endswith('.json'):
+            return pd.read_json(filepath)
+        elif filepath.endswith('.xlsx') or filepath.endswith('.xls'):
+            return pd.read_excel(filepath)
+        else:
+            # Assume CSV
+            return pd.read_csv(filepath)
+    
+    def _standardize_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Standardize column names to: Date, Symbol, Open, High, Low, Close, Volume
+        
+        Handles common variations in column naming.
+        """
+        # Common column name mappings (lowercase -> standard)
+        column_mappings = {
+            'date': 'Date',
+            'datetime': 'Date',
+            'timestamp': 'Date',
+            'symbol': 'Symbol',
+            'ticker': 'Symbol',
+            'stock': 'Symbol',
+            'open': 'Open',
+            'open_price': 'Open',
+            'high': 'High',
+            'high_price': 'High',
+            'low': 'Low',
+            'low_price': 'Low',
+            'close': 'Close',
+            'close_price': 'Close',
+            'adj_close': 'Close',
+            'adjusted_close': 'Close',
+            'volume': 'Volume',
+            'vol': 'Volume',
+            'traded_volume': 'Volume'
+        }
+        
+        # Rename columns
+        df.columns = [column_mappings.get(col.lower(), col) for col in df.columns]
+        
+        # Ensure required columns exist
+        required = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
+        for col in required:
+            if col not in df.columns:
+                if col == 'Volume':
+                    df[col] = 0  # Default volume if missing
+                else:
+                    raise ValueError(f"Required column '{col}' not found in dataset")
+        
+        return df
+    
+    def _generate_sample_data_for_symbols(
+        self, 
+        symbols: List[str], 
+        start_date: str, 
+        end_date: str
+    ) -> pd.DataFrame:
+        """
+        Generate sample data for testing when hackathon data unavailable.
+        
+        ⚠️ FOR TESTING ONLY - NOT FOR HACKATHON SUBMISSION!
+        """
         all_data = []
         
         for symbol in symbols:
-            try:
-                print(f"Fetching data for {symbol}...")
-                df = self._fetch_single_symbol(symbol, start_date, end_date, interval)
-                if df is not None and not df.empty:
-                    df['Symbol'] = symbol
-                    all_data.append(df)
-                else:
-                    print(f"Warning: No data received for {symbol}")
-            except Exception as e:
-                print(f"Error fetching data for {symbol}: {e}")
-                continue
+            df = self._generate_sample_data(symbol, start_date, end_date)
+            df['Symbol'] = symbol
+            all_data.append(df)
         
-        if not all_data:
-            raise ValueError("No data could be fetched for any symbols")
-        
-        # Combine all dataframes
-        combined_df = pd.concat(all_data, ignore_index=True)
-        combined_df = combined_df.sort_values(['Symbol', 'Date']).reset_index(drop=True)
-        
-        return combined_df
-    
-    def _fetch_single_symbol(
-        self, 
-        symbol: str, 
-        start_date: str, 
-        end_date: str,
-        interval: str
-    ) -> Optional[pd.DataFrame]:
-        """
-        Fetch data for a single symbol.
-        Note: This is a placeholder implementation. The actual API endpoint
-        and parameters need to be adjusted based on the real API documentation.
-        """
-        # Since we don't have direct API documentation, we'll create
-        # a fallback mechanism to use Yahoo Finance or generate sample data
-        try:
-            # Try to use yfinance as fallback for Indian stocks
-            import yfinance as yf
-            
-            # Add .NS suffix for NSE stocks
-            ticker_symbol = f"{symbol}.NS"
-            ticker = yf.Ticker(ticker_symbol)
-            
-            df = ticker.history(start=start_date, end=end_date, interval=interval)
-            
-            if df.empty:
-                print(f"No data from yfinance for {symbol}, generating sample data")
-                return self._generate_sample_data(symbol, start_date, end_date)
-            
-            # Rename columns to match our standard
-            df = df.reset_index()
-            df = df.rename(columns={
-                'Date': 'Date',
-                'Open': 'Open',
-                'High': 'High',
-                'Low': 'Low',
-                'Close': 'Close',
-                'Volume': 'Volume'
-            })
-            
-            # Keep only required columns
-            df = df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume']]
-            
-            return df
-            
-        except ImportError:
-            print(f"yfinance not available, generating sample data for {symbol}")
-            return self._generate_sample_data(symbol, start_date, end_date)
-        except Exception as e:
-            print(f"Error in _fetch_single_symbol for {symbol}: {e}")
-            return self._generate_sample_data(symbol, start_date, end_date)
+        if all_data:
+            return pd.concat(all_data, ignore_index=True)
+        return pd.DataFrame()
     
     def _generate_sample_data(
         self, 
@@ -116,10 +258,9 @@ class EquityDataFetcher:
     ) -> pd.DataFrame:
         """
         Generate realistic sample data for demonstration purposes.
-        This creates a trending price series with volatility.
-        """
-        import numpy as np
         
+        ⚠️ FOR TESTING ONLY - NOT FOR HACKATHON SUBMISSION!
+        """
         # Convert dates
         start = pd.to_datetime(start_date)
         end = pd.to_datetime(end_date)
@@ -146,6 +287,9 @@ class EquityDataFetcher:
         # Generate random walk with trend
         np.random.seed(hash(symbol) % 2**32)
         n_days = len(dates)
+        
+        if n_days == 0:
+            return pd.DataFrame()
         
         # Returns with slight upward bias
         returns = np.random.normal(0.0005, 0.02, n_days)
@@ -185,13 +329,17 @@ class EquityDataFetcher:
         return df
 
 
+# Backward-compatible class alias
+EquityDataFetcher = HackathonDataFetcher
+
+
 def fetch_equity_data(
     symbols: List[str], 
     start_date: str, 
     end_date: str
 ) -> pd.DataFrame:
     """
-    Convenience function to fetch equity data.
+    Convenience function to fetch equity data from hackathon dataset.
     
     Args:
         symbols: List of stock symbols
@@ -201,14 +349,21 @@ def fetch_equity_data(
     Returns:
         DataFrame with OHLCV data for all symbols
     """
-    fetcher = EquityDataFetcher()
+    fetcher = HackathonDataFetcher()
     return fetcher.fetch_equity_data(symbols, start_date, end_date)
 
 
 if __name__ == "__main__":
     # Test the fetcher
+    print("Testing hackathon data fetcher...")
+    print("")
+    
     symbols = ['RELIANCE', 'TCS', 'INFY']
     data = fetch_equity_data(symbols, '2023-01-01', '2024-01-01')
-    print(data.head())
-    print(f"\nTotal records: {len(data)}")
-    print(f"\nSymbols: {data['Symbol'].unique()}")
+    
+    if not data.empty:
+        print("\nSample data:")
+        print(data.head(10))
+        print(f"\nTotal records: {len(data)}")
+        print(f"Symbols: {data['Symbol'].unique()}")
+        print(f"Date range: {data['Date'].min()} to {data['Date'].max()}")

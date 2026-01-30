@@ -20,6 +20,9 @@ from strategy.signals import generate_signals
 from backtesting.engine import run_backtest
 from backtesting.metrics import PerformanceMetrics
 
+# Options module imports (Hackathon addition)
+from options.option_backtester import run_options_backtest, OptionsPerformanceMetrics
+
 # Page configuration
 st.set_page_config(
     page_title="Algorithmic Trading System",
@@ -108,10 +111,29 @@ st.markdown("""
 
 # Title and description
 st.markdown("<h1>📈 Algorithmic Trading System</h1>", unsafe_allow_html=True)
-st.markdown("**Multi-Indicator Momentum Strategy** | Equity Markets")
+st.markdown("**Multi-Indicator Momentum Strategy** | Equity & Options Markets")
 
 # Sidebar controls
 st.sidebar.markdown("## ⚙️ Configuration")
+
+# ASSET CLASS SELECTOR (NEW - Hackathon Feature)
+st.sidebar.markdown("### 🎯 Asset Class")
+asset_class = st.sidebar.radio(
+    "Select trading mode:",
+    options=["Equity", "Options"],
+    index=0,
+    help="Equity: Direct stock trading | Options: CALL/PUT based on equity signals"
+)
+
+# Show options info if selected
+if asset_class == "Options":
+    st.sidebar.info(
+        "📌 **Options Mode:**\n"
+        "• BUY signal → Buy CALL\n"
+        "• SELL signal → Buy PUT\n"
+        "• Premium ≈ 2% of stock price\n"
+        "• Exit: +50% profit / -30% loss"
+    )
 
 # Stock selection
 st.sidebar.markdown("### 📊 Select Stocks")
@@ -259,21 +281,35 @@ if run_backtest_button:
                     rsi_overbought=rsi_overbought
                 )
                 
-                # Run backtest
-                st.info("⚙️ Running backtest simulation...")
+                # Run backtest (EQUITY or OPTIONS based on selection)
                 progress_bar.progress(85)
-                results = run_backtest(
-                    df_with_signals,
-                    initial_capital=initial_capital,
-                    position_size=position_size,
-                    max_positions=max_positions,
-                    stop_loss_pct=stop_loss,
-                    take_profit_pct=take_profit
-                )
                 
-                # Calculate metrics
-                metrics_calc = PerformanceMetrics(results)
-                metrics = metrics_calc.calculate_all_metrics()
+                if asset_class == "Equity":
+                    st.info("⚙️ Running EQUITY backtest...")
+                    results = run_backtest(
+                        df_with_signals,
+                        initial_capital=initial_capital,
+                        position_size=position_size,
+                        max_positions=max_positions,
+                        stop_loss_pct=stop_loss,
+                        take_profit_pct=take_profit
+                    )
+                    # Calculate metrics
+                    metrics_calc = PerformanceMetrics(results)
+                    metrics = metrics_calc.calculate_all_metrics()
+                else:
+                    st.info("⚙️ Running OPTIONS backtest (CALL/PUT from equity signals)...")
+                    results = run_options_backtest(
+                        df_with_signals,
+                        initial_capital=initial_capital,
+                        position_size_pct=position_size,
+                        max_positions=max_positions,
+                        profit_target_pct=take_profit * 100 * 5,  # Scale to 50%
+                        stop_loss_pct=-stop_loss * 100 * 6  # Scale to -30%
+                    )
+                    # Calculate metrics
+                    metrics_calc = OptionsPerformanceMetrics(results)
+                    metrics = metrics_calc.calculate_all_metrics()
                 
                 progress_bar.progress(100)
                 
@@ -293,8 +329,12 @@ if st.session_state.backtest_results is not None:
     results = st.session_state.backtest_results
     metrics = st.session_state.metrics
     
+    # Detect asset class from results
+    is_options = results.get('asset_class') == 'options'
+    asset_label = "📊 OPTIONS" if is_options else "📈 EQUITY"
+    
     # Key metrics at the top
-    st.markdown("## 📊 Performance Overview")
+    st.markdown(f"## {asset_label} Performance Overview")
     
     col1, col2, col3, col4, col5 = st.columns(5)
     
