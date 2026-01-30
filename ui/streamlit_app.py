@@ -157,8 +157,17 @@ initial_capital = 1000000  # Default capital
 if asset_class == "Futures":
     st.sidebar.markdown("### 📁 Data Source")
     
-    # Preset CSV path
-    PRESET_CSV_PATH = "d:/ALGO TRADING FINAL/futures/nifty_futures_1m_last_60_days.csv"
+    # Preset CSV paths (check multiple locations)
+    import os
+    PRESET_PATHS = [
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "sample", "nifty_futures_1m_last_60_days.csv"),
+        "d:/ALGO TRADING FINAL/br/nifty_futures_1m_last_60_days.csv",
+    ]
+    PRESET_CSV_PATH = None
+    for p in PRESET_PATHS:
+        if os.path.exists(p):
+            PRESET_CSV_PATH = p
+            break
     
     data_source = st.sidebar.radio(
         "Choose data source:",
@@ -169,15 +178,11 @@ if asset_class == "Futures":
     futures_df = None
     
     if data_source == "Use Preset Data":
-        st.sidebar.success("📊 Will use: `nifty_futures_1m_last_60_days.csv`")
-        try:
-            import os
-            if os.path.exists(PRESET_CSV_PATH):
-                st.sidebar.caption(f"File found at: {PRESET_CSV_PATH}")
-            else:
-                st.sidebar.warning("Preset file not found. Please upload a CSV.")
-        except:
-            pass
+        if PRESET_CSV_PATH:
+            st.sidebar.success("📊 Will use: `nifty_futures_1m_last_60_days.csv`")
+            st.sidebar.caption(f"File found at: {PRESET_CSV_PATH}")
+        else:
+            st.sidebar.warning("Preset file not found. Please upload a CSV.")
     else:
         uploaded_file = st.sidebar.file_uploader(
             "Upload OHLC CSV",
