@@ -51,12 +51,12 @@ class DataPreprocessor:
         
         for symbol in df['Symbol'].unique():
             mask = df['Symbol'] == symbol
-            df.loc[mask, price_columns] = df.loc[mask, price_columns].fillna(method='ffill')
+            df.loc[mask, price_columns] = df.loc[mask, price_columns].ffill()
         
         # Fill remaining NaN with backward fill
         for symbol in df['Symbol'].unique():
             mask = df['Symbol'] == symbol
-            df.loc[mask, price_columns] = df.loc[mask, price_columns].fillna(method='bfill')
+            df.loc[mask, price_columns] = df.loc[mask, price_columns].bfill()
         
         # Fill volume with 0 if missing
         df['Volume'] = df['Volume'].fillna(0)

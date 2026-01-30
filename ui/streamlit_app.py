@@ -123,7 +123,7 @@ available_stocks = [
 selected_stocks = st.sidebar.multiselect(
     "Choose stocks to analyze",
     options=available_stocks,
-    default=['RELIANCE', 'TCS', 'INFY'],
+    default=['RELIANCE'],
     help="Select 1-5 stocks for backtesting"
 )
 
@@ -133,7 +133,7 @@ col1, col2 = st.sidebar.columns(2)
 with col1:
     start_date = st.date_input(
         "Start Date",
-        value=pd.to_datetime('2022-01-01')
+        value=pd.to_datetime('2023-01-01')
     )
 with col2:
     end_date = st.date_input(
@@ -145,8 +145,8 @@ with col2:
 st.sidebar.markdown("### 🎯 Strategy Parameters")
 
 with st.sidebar.expander("Moving Averages", expanded=False):
-    short_ma = st.slider("Short MA Period", 10, 50, 20)
-    long_ma = st.slider("Long MA Period", 30, 100, 50)
+    short_ma = st.slider("Short MA Period", 5, 30, 10)
+    long_ma = st.slider("Long MA Period", 20, 60, 30)
 
 with st.sidebar.expander("RSI", expanded=False):
     rsi_period = st.slider("RSI Period", 7, 21, 14)
@@ -173,7 +173,7 @@ position_size = st.sidebar.slider(
     "Position Size (%)",
     min_value=5,
     max_value=50,
-    value=20,
+    value=15,
     help="Percentage of portfolio per trade"
 ) / 100
 
@@ -181,14 +181,14 @@ max_positions = st.sidebar.slider(
     "Max Concurrent Positions",
     min_value=1,
     max_value=5,
-    value=3
+    value=4
 )
 
 stop_loss = st.sidebar.slider(
     "Stop Loss (%)",
     min_value=1,
     max_value=15,
-    value=5,
+    value=7,
     help="Percentage below entry price"
 ) / 100
 
@@ -196,7 +196,7 @@ take_profit = st.sidebar.slider(
     "Take Profit (%)",
     min_value=5,
     max_value=30,
-    value=10,
+    value=15,
     help="Percentage above entry price"
 ) / 100
 
