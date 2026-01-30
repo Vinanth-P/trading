@@ -23,6 +23,9 @@ from backtesting.metrics import PerformanceMetrics
 # Options module imports (Hackathon addition)
 from options.option_backtester import run_options_backtest, OptionsPerformanceMetrics
 
+# Futures module imports (Separate ICT strategy)
+from futures_strategy.backtest import run_futures_backtest
+
 # Page configuration
 st.set_page_config(
     page_title="Algorithmic Trading System",
@@ -120,9 +123,9 @@ st.sidebar.markdown("## ⚙️ Configuration")
 st.sidebar.markdown("### 🎯 Asset Class")
 asset_class = st.sidebar.radio(
     "Select trading mode:",
-    options=["Equity", "Options"],
+    options=["Equity", "Options", "Futures"],
     index=0,
-    help="Equity: Direct stock trading | Options: CALL/PUT based on equity signals"
+    help="Equity: Direct stock trading | Options: CALL/PUT based on equity signals | Futures: NIFTY Futures with ICT strategy"
 )
 
 # Show options info if selected
@@ -135,100 +138,168 @@ if asset_class == "Options":
         "• Exit: +50% profit / -30% loss"
     )
 
-# Stock selection
-st.sidebar.markdown("### 📊 Select Stocks")
-available_stocks = [
-    'RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'ICICIBANK',
-    'SBIN', 'BHARTIARTL', 'ITC', 'KOTAKBANK', 'LT'
-]
-
-selected_stocks = st.sidebar.multiselect(
-    "Choose stocks to analyze",
-    options=available_stocks,
-    default=['RELIANCE', 'TCS', 'INFY'],
-    help="Select 1-5 stocks for backtesting"
-)
-
-# Date range
-st.sidebar.markdown("### 📅 Date Range")
-col1, col2 = st.sidebar.columns(2)
-with col1:
-    start_date = st.date_input(
-        "Start Date",
-        value=pd.to_datetime('2022-01-01')
-    )
-with col2:
-    end_date = st.date_input(
-        "End Date",
-        value=pd.to_datetime('2024-01-01')
+# Show Futures info if selected
+if asset_class == "Futures":
+    st.sidebar.info(
+        "📌 **Futures Mode (ICT Strategy):**\n"
+        "• Session-based trading (9:15-12:00, 13:30-15:30)\n"
+        "• FVG Tally for bias detection\n"
+        "• PDH/PDL sweep confirmation\n"
+        "• Displacement + BOS entry\n"
+        "• Risk: 1-2% per trade"
     )
 
-# Strategy parameters
-st.sidebar.markdown("### 🎯 Strategy Parameters")
+# Initialize selected_stocks with default even if not used (for Futures mode)
+selected_stocks = []
+initial_capital = 1000000  # Default capital
 
-with st.sidebar.expander("Moving Averages", expanded=False):
-    short_ma = st.slider("Short MA Period", 10, 50, 20)
-    long_ma = st.slider("Long MA Period", 30, 100, 50)
+# ============ FUTURES MODE SIDEBAR ============
+if asset_class == "Futures":
+    st.sidebar.markdown("### 📁 Data Source")
+    
+    # Preset CSV path
+    PRESET_CSV_PATH = "d:/ALGO TRADING FINAL/futures/nifty_futures_1m_last_60_days.csv"
+    
+    data_source = st.sidebar.radio(
+        "Choose data source:",
+        options=["Use Preset Data", "Upload CSV"],
+        index=0
+    )
+    
+    futures_df = None
+    
+    if data_source == "Use Preset Data":
+        st.sidebar.success("📊 Will use: `nifty_futures_1m_last_60_days.csv`")
+        try:
+            import os
+            if os.path.exists(PRESET_CSV_PATH):
+                st.sidebar.caption(f"File found at: {PRESET_CSV_PATH}")
+            else:
+                st.sidebar.warning("Preset file not found. Please upload a CSV.")
+        except:
+            pass
+    else:
+        uploaded_file = st.sidebar.file_uploader(
+            "Upload OHLC CSV",
+            type=['csv'],
+            help="CSV must have columns: datetime, open, high, low, close"
+        )
+        if uploaded_file is not None:
+            st.sidebar.success(f"✅ Uploaded: {uploaded_file.name}")
+    
+    initial_capital = st.sidebar.number_input(
+        "Initial Capital (₹)",
+        min_value=100000,
+        max_value=10000000,
+        value=1000000,
+        step=100000,
+        format="%d"
+    )
+    
+    # Run backtest button for Futures
+    st.sidebar.markdown("---")
+    run_backtest_button = st.sidebar.button(
+        "🚀 Run Futures Backtest",
+        use_container_width=True,
+        type="primary"
+    )
 
-with st.sidebar.expander("RSI", expanded=False):
-    rsi_period = st.slider("RSI Period", 7, 21, 14)
-    rsi_oversold = st.slider("RSI Oversold", 20, 40, 30)
-    rsi_overbought = st.slider("RSI Overbought", 60, 80, 70)
-
-with st.sidebar.expander("MACD", expanded=False):
-    macd_fast = st.slider("MACD Fast", 8, 16, 12)
-    macd_slow = st.slider("MACD Slow", 20, 30, 26)
-    macd_signal = st.slider("MACD Signal", 7, 12, 9)
-
-# Risk management
-st.sidebar.markdown("### ⚠️ Risk Management")
-initial_capital = st.sidebar.number_input(
-    "Initial Capital (₹)",
-    min_value=100000,
-    max_value=10000000,
-    value=1000000,
-    step=100000,
-    format="%d"
-)
-
-position_size = st.sidebar.slider(
-    "Position Size (%)",
-    min_value=5,
-    max_value=50,
-    value=20,
-    help="Percentage of portfolio per trade"
-) / 100
-
-max_positions = st.sidebar.slider(
-    "Max Concurrent Positions",
-    min_value=1,
-    max_value=5,
-    value=3
-)
-
-stop_loss = st.sidebar.slider(
-    "Stop Loss (%)",
-    min_value=1,
-    max_value=15,
-    value=5,
-    help="Percentage below entry price"
-) / 100
-
-take_profit = st.sidebar.slider(
-    "Take Profit (%)",
-    min_value=5,
-    max_value=30,
-    value=10,
-    help="Percentage above entry price"
-) / 100
-
-# Run backtest button
-st.sidebar.markdown("---")
-run_backtest_button = st.sidebar.button(
-    "🚀 Run Backtest",
-    use_container_width=True,
-    type="primary"
-)
+# ============ EQUITY / OPTIONS MODE SIDEBAR ============
+else:
+    # Stock selection
+    st.sidebar.markdown("### 📊 Select Stocks")
+    available_stocks = [
+        'RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'ICICIBANK',
+        'SBIN', 'BHARTIARTL', 'ITC', 'KOTAKBANK', 'LT'
+    ]
+    
+    selected_stocks = st.sidebar.multiselect(
+        "Choose stocks to analyze",
+        options=available_stocks,
+        default=['RELIANCE', 'TCS', 'INFY'],
+        help="Select 1-5 stocks for backtesting"
+    )
+    
+    # Date range
+    st.sidebar.markdown("### 📅 Date Range")
+    col1, col2 = st.sidebar.columns(2)
+    with col1:
+        start_date = st.date_input(
+            "Start Date",
+            value=pd.to_datetime('2022-01-01')
+        )
+    with col2:
+        end_date = st.date_input(
+            "End Date",
+            value=pd.to_datetime('2024-01-01')
+        )
+    
+    # Strategy parameters
+    st.sidebar.markdown("### 🎯 Strategy Parameters")
+    
+    with st.sidebar.expander("Moving Averages", expanded=False):
+        short_ma = st.slider("Short MA Period", 10, 50, 20)
+        long_ma = st.slider("Long MA Period", 30, 100, 50)
+    
+    with st.sidebar.expander("RSI", expanded=False):
+        rsi_period = st.slider("RSI Period", 7, 21, 14)
+        rsi_oversold = st.slider("RSI Oversold", 20, 40, 30)
+        rsi_overbought = st.slider("RSI Overbought", 60, 80, 70)
+    
+    with st.sidebar.expander("MACD", expanded=False):
+        macd_fast = st.slider("MACD Fast", 8, 16, 12)
+        macd_slow = st.slider("MACD Slow", 20, 30, 26)
+        macd_signal = st.slider("MACD Signal", 7, 12, 9)
+    
+    # Risk management
+    st.sidebar.markdown("### ⚠️ Risk Management")
+    initial_capital = st.sidebar.number_input(
+        "Initial Capital (₹)",
+        min_value=100000,
+        max_value=10000000,
+        value=1000000,
+        step=100000,
+        format="%d"
+    )
+    
+    position_size = st.sidebar.slider(
+        "Position Size (%)",
+        min_value=5,
+        max_value=50,
+        value=20,
+        help="Percentage of portfolio per trade"
+    ) / 100
+    
+    max_positions = st.sidebar.slider(
+        "Max Concurrent Positions",
+        min_value=1,
+        max_value=5,
+        value=3
+    )
+    
+    stop_loss = st.sidebar.slider(
+        "Stop Loss (%)",
+        min_value=1,
+        max_value=15,
+        value=5,
+        help="Percentage below entry price"
+    ) / 100
+    
+    take_profit = st.sidebar.slider(
+        "Take Profit (%)",
+        min_value=5,
+        max_value=30,
+        value=10,
+        help="Percentage above entry price"
+    ) / 100
+    
+    # Run backtest button
+    st.sidebar.markdown("---")
+    run_backtest_button = st.sidebar.button(
+        "🚀 Run Backtest",
+        use_container_width=True,
+        type="primary"
+    )
 
 # Initialize session state
 if 'backtest_results' not in st.session_state:
@@ -236,9 +307,57 @@ if 'backtest_results' not in st.session_state:
 if 'metrics' not in st.session_state:
     st.session_state.metrics = None
 
+
 # Run backtest
 if run_backtest_button:
-    if not selected_stocks:
+    # ============ FUTURES MODE BACKTEST ============
+    if asset_class == "Futures":
+        with st.spinner('🔄 Running Futures backtest with ICT strategy...'):
+            try:
+                progress_bar = st.progress(0)
+                st.info("📥 Loading futures data...")
+                progress_bar.progress(20)
+                
+                # Load data based on source selection
+                import os
+                PRESET_CSV_PATH = "d:/ALGO TRADING FINAL/futures/nifty_futures_1m_last_60_days.csv"
+                
+                if data_source == "Use Preset Data":
+                    if os.path.exists(PRESET_CSV_PATH):
+                        futures_df = pd.read_csv(PRESET_CSV_PATH)
+                        st.success(f"✅ Loaded {len(futures_df):,} candles from preset file")
+                    else:
+                        st.error(f"❌ Preset file not found: {PRESET_CSV_PATH}")
+                        st.stop()
+                else:
+                    if uploaded_file is not None:
+                        futures_df = pd.read_csv(uploaded_file)
+                        st.success(f"✅ Loaded {len(futures_df):,} candles from uploaded file")
+                    else:
+                        st.error("❌ Please upload a CSV file!")
+                        st.stop()
+                
+                progress_bar.progress(50)
+                st.info("⚙️ Running ICT strategy backtest...")
+                
+                # Run futures backtest
+                results = run_futures_backtest(futures_df, initial_equity=initial_capital)
+                
+                progress_bar.progress(100)
+                
+                # Store in session state
+                st.session_state.backtest_results = results
+                st.session_state.metrics = results['metrics']
+                
+                st.success("✅ Futures backtest completed successfully!")
+                
+            except Exception as e:
+                st.error(f"❌ Error during backtest: {str(e)}")
+                import traceback
+                st.code(traceback.format_exc())
+    
+    # ============ EQUITY / OPTIONS MODE BACKTEST ============
+    elif not selected_stocks:
         st.error("⚠️ Please select at least one stock!")
     else:
         with st.spinner('🔄 Fetching data and running backtest...'):
@@ -324,6 +443,7 @@ if run_backtest_button:
                 import traceback
                 st.code(traceback.format_exc())
 
+
 # Display results
 if st.session_state.backtest_results is not None:
     results = st.session_state.backtest_results
@@ -331,70 +451,293 @@ if st.session_state.backtest_results is not None:
     
     # Detect asset class from results
     is_options = results.get('asset_class') == 'options'
-    asset_label = "📊 OPTIONS" if is_options else "📈 EQUITY"
+    is_futures = results.get('asset_class') == 'futures'
+    
+    if is_futures:
+        asset_label = "📊 FUTURES (ICT Strategy)"
+    elif is_options:
+        asset_label = "📊 OPTIONS"
+    else:
+        asset_label = "📈 EQUITY"
     
     # Key metrics at the top
     st.markdown(f"## {asset_label} Performance Overview")
     
     col1, col2, col3, col4, col5 = st.columns(5)
     
-    with col1:
-        total_return = metrics['Total Return (%)']
-        st.metric(
-            "Total Return",
-            f"{total_return:.2f}%",
-            delta=f"{total_return:.2f}%"
-        )
-    
-    with col2:
-        sharpe = metrics['Sharpe Ratio']
-        st.metric(
-            "Sharpe Ratio",
-            f"{sharpe:.2f}",
-            delta="Higher is better"
-        )
-    
-    with col3:
-        win_rate = metrics['Win Rate (%)']
-        st.metric(
-            "Win Rate",
+    # Futures mode uses different metric keys
+    if is_futures:
+        with col1:
+            total_return = metrics.get('Total Return', 0)
+            st.metric(
+                "Total Return",
+                f"{total_return:.2f}%",
+                delta=f"{total_return:.2f}%"
+            )
+        
+        with col2:
+            profit_factor = metrics.get('Profit Factor', 0)
+            st.metric(
+                "Profit Factor",
+                f"{profit_factor:.2f}",
+                delta="Higher is better"
+            )
+        
+        with col3:
+            win_rate = metrics.get('Win Rate', 0)
+            st.metric(
+                "Win Rate",
+                f"{win_rate:.1f}%"
+            )
+        
+        with col4:
+            total_pnl = metrics.get('Total PnL', 0)
+            st.metric(
+                "Total P&L",
+                f"₹{total_pnl:,.0f}",
+                delta=f"₹{total_pnl:,.0f}"
+            )
+        
+        with col5:
+            total_trades = metrics.get('Total Trades', 0)
+            st.metric(
+                "Total Trades",
+                f"{int(total_trades)}"
+            )
+    else:
+        with col1:
+            total_return = metrics['Total Return (%)']
+            st.metric(
+                "Total Return",
+                f"{total_return:.2f}%",
+                delta=f"{total_return:.2f}%"
+            )
+        
+        with col2:
+            sharpe = metrics['Sharpe Ratio']
+            st.metric(
+                "Sharpe Ratio",
+                f"{sharpe:.2f}",
+                delta="Higher is better"
+            )
+        
+        with col3:
+            win_rate = metrics['Win Rate (%)']
+            st.metric(
+                "Win Rate",
+
             f"{win_rate:.1f}%"
         )
-    
-    with col4:
-        max_dd = metrics['Max Drawdown (%)']
-        st.metric(
-            "Max Drawdown",
-            f"{abs(max_dd):.2f}%",
-            delta=f"-{abs(max_dd):.2f}%",
-            delta_color="inverse"
-        )
-    
-    with col5:
-        total_trades = metrics['Total Trades']
-        st.metric(
-            "Total Trades",
-            f"{int(total_trades)}"
-        )
+        
+        with col4:
+            max_dd = metrics['Max Drawdown (%)']
+            st.metric(
+                "Max Drawdown",
+                f"{abs(max_dd):.2f}%",
+                delta=f"-{abs(max_dd):.2f}%",
+                delta_color="inverse"
+            )
+        
+        with col5:
+            total_trades = metrics['Total Trades']
+            st.metric(
+                "Total Trades",
+                f"{int(total_trades)}"
+            )
     
     st.markdown("---")
     
-    # Tabs for different visualizations
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📈 Price Charts", "💰 Portfolio Performance", "📊 Trade Analysis", "⚠️ Risk Metrics", "📋 Trade Log"
-    ])
+    # ============ FUTURES MODE VISUALIZATION ============
+    if is_futures:
+        tab1, tab2, tab3 = st.tabs([
+            "📈 Candlestick Chart", "💰 Equity Curve", "📋 Trade Log"
+        ])
+        
+        with tab1:
+            st.markdown("### NIFTY Futures - Price Chart with Trade Signals")
+            
+            data_df = results['data']
+            if not data_df.empty:
+                # Create candlestick chart
+                fig = go.Figure()
+                
+                # Candlestick
+                fig.add_trace(
+                    go.Candlestick(
+                        x=data_df.index,
+                        open=data_df['open'],
+                        high=data_df['high'],
+                        low=data_df['low'],
+                        close=data_df['close'],
+                        name='Price',
+                        increasing_line_color='#00ff88',
+                        decreasing_line_color='#ff3366'
+                    )
+                )
+                
+                # Buy signals (BULLISH trades)
+                buy_signals = data_df[data_df['signal'] == 1]
+                if not buy_signals.empty:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=buy_signals.index,
+                            y=buy_signals['low'] * 0.999,  # Slightly below low
+                            mode='markers',
+                            name='LONG Entry',
+                            marker=dict(
+                                symbol='triangle-up',
+                                size=12,
+                                color='#00ff88',
+                                line=dict(color='white', width=1)
+                            )
+                        )
+                    )
+                
+                # Sell signals (BEARISH trades)
+                sell_signals = data_df[data_df['signal'] == -1]
+                if not sell_signals.empty:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=sell_signals.index,
+                            y=sell_signals['high'] * 1.001,  # Slightly above high
+                            mode='markers',
+                            name='SHORT Entry',
+                            marker=dict(
+                                symbol='triangle-down',
+                                size=12,
+                                color='#ff3366',
+                                line=dict(color='white', width=1)
+                            )
+                        )
+                    )
+                
+                fig.update_layout(
+                    title="NIFTY Futures with ICT Strategy Signals",
+                    xaxis_title="DateTime",
+                    yaxis_title="Price (₹)",
+                    template='plotly_dark',
+                    height=700,
+                    xaxis_rangeslider_visible=False,
+                    hovermode='x unified'
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Show trade statistics
+                st.markdown("#### Trade Statistics")
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("LONG Trades", f"{len(buy_signals)}")
+                with col2:
+                    st.metric("SHORT Trades", f"{len(sell_signals)}")
+                with col3:
+                    st.metric("Avg R:R", f"{metrics.get('Average RR', 0):.2f}")
+                with col4:
+                    st.metric("Avg Trade P&L", f"₹{metrics.get('Average Trade PnL', 0):,.0f}")
+            else:
+                st.warning("No data to display.")
+        
+        with tab2:
+            st.markdown("### Equity Curve")
+            
+            equity_df = results.get('equity_curve', pd.DataFrame())
+            if not equity_df.empty:
+                fig = go.Figure()
+                
+                fig.add_trace(
+                    go.Scatter(
+                        x=equity_df['date'].astype(str),
+                        y=equity_df['equity'],
+                        name='Equity',
+                        line=dict(color='#00ff88', width=3),
+                        fill='tozeroy',
+                        fillcolor='rgba(0, 255, 136, 0.1)'
+                    )
+                )
+                
+                fig.add_hline(
+                    y=results['initial_capital'],
+                    line_dash="dash",
+                    line_color="orange",
+                    annotation_text="Initial Capital",
+                    annotation_position="right"
+                )
+                
+                fig.update_layout(
+                    title="Portfolio Equity Over Time",
+                    xaxis_title="Date",
+                    yaxis_title="Equity (₹)",
+                    template='plotly_dark',
+                    height=500,
+                    hovermode='x unified'
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Additional metrics
+                st.markdown("#### Performance Summary")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Initial Capital", f"₹{results['initial_capital']:,}")
+                with col2:
+                    st.metric("Final Capital", f"₹{results['final_capital']:,.0f}")
+                with col3:
+                    pnl = results['final_capital'] - results['initial_capital']
+                    st.metric("Net P&L", f"₹{pnl:,.0f}", delta=f"₹{pnl:,.0f}")
+            else:
+                st.warning("No equity data to display.")
+        
+        with tab3:
+            st.markdown("### Complete Trade Log")
+            
+            trades_df = results.get('trades_df', pd.DataFrame())
+            if not trades_df.empty:
+                # Format for display
+                display_df = trades_df.copy()
+                display_df['time'] = pd.to_datetime(display_df['time']).dt.strftime('%Y-%m-%d %H:%M')
+                display_df['entry'] = display_df['entry'].apply(lambda x: f"₹{x:,.2f}")
+                display_df['stop'] = display_df['stop'].apply(lambda x: f"₹{x:,.2f}")
+                display_df['target'] = display_df['target'].apply(lambda x: f"₹{x:,.2f}")
+                display_df['pnl'] = display_df['pnl'].apply(lambda x: f"₹{x:,.0f}")
+                display_df['rr'] = display_df['rr'].apply(lambda x: f"{x:.2f}")
+                
+                st.dataframe(
+                    display_df[['date', 'time', 'bias', 'entry', 'stop', 'target', 'rr', 'pnl']],
+                    use_container_width=True,
+                    height=500
+                )
+                
+                # Download button
+                csv = trades_df.to_csv(index=False)
+                st.download_button(
+                    label="📥 Download Trade Log (CSV)",
+                    data=csv,
+                    file_name="futures_trade_log.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.info("No trades were executed in this backtest. The strategy may not have found valid setups in the data.")
     
-    with tab1:
-        st.markdown("### Price Charts with Trade Signals")
-        
-        # Select stock to display
-        display_stock = st.selectbox(
-            "Select stock to view",
-            options=selected_stocks
-        )
-        
-        if display_stock:
-            stock_data = results['data'][results['data']['Symbol'] == display_stock].copy()
+    # ============ EQUITY / OPTIONS VISUALIZATION ============
+    else:
+        # Tabs for different visualizations
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "📈 Price Charts", "💰 Portfolio Performance", "📊 Trade Analysis", "⚠️ Risk Metrics", "📋 Trade Log"
+        ])
+
+    
+        with tab1:
+            st.markdown("### Price Charts with Trade Signals")
+            
+            # Select stock to display
+            display_stock = st.selectbox(
+                "Select stock to view",
+                options=selected_stocks
+            )
+            
+            if display_stock:
+                stock_data = results['data'][results['data']['Symbol'] == display_stock].copy()
+
             
             # Create candlestick chart with indicators
             fig = make_subplots(
