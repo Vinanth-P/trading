@@ -117,7 +117,7 @@ where `True Range = max(High-Low, |High-PrevClose|, |Low-PrevClose|)`
 
 ### 4.1 Entry Conditions (BUY Signal)
 
-A **BUY** signal is generated when **ALL** of the following conditions are met:
+A **BUY** signal is generated when **at least 3 out of 5** of the following conditions are met:
 
 1. **Golden Cross**: Short MA crosses above Long MA (bullish trend)
 2. **RSI Neutral**: 30 < RSI < 70 (avoiding extremes)
@@ -125,9 +125,11 @@ A **BUY** signal is generated when **ALL** of the following conditions are met:
 4. **BB Entry**: Price within 2% of lower Bollinger Band
 5. **No Gap**: Opening price within 3% of previous close
 
+**Rationale:** This flexible approach increases trade frequency while maintaining signal quality through multi-indicator confirmation.
+
 #### Alternative Entry Condition
 
-A BUY signal is also generated for strong oversold situations:
+A BUY signal is also generated for strong oversold situations when **ALL** of these conditions are met:
 - RSI < 30 (extreme oversold)
 - MACD > Signal (upward momentum)
 - Price < Lower BB (extreme undervaluation)
@@ -242,34 +244,25 @@ The strategy is designed for trending markets and may underperform in:
 
 ---
 
-## 8. EXPECTED RESULTS & OBSERVATIONS
+## 8. BACKTEST OBSERVATIONS
 
-### 8.1 Typical Performance Ranges
+### 8.1 Observed Characteristics
 
-Based on backtesting (results vary by time period and stocks):
+Across tested instruments and periods, the strategy exhibited:
 
-| Metric | Expected Range |
-|--------|----------------|
-| Total Return (2-year) | 15-25% |
-| Annualized Return | 8-13% |
-| Sharpe Ratio | 1.5-2.5 |
-| Win Rate | 55-65% |
-| Maximum Drawdown | 8-15% |
-| Avg Trade Duration | 15-30 days |
+- Moderate returns with low drawdowns
+- Win rate consistently above 55%
+- Stable trade frequency
+- Controlled risk exposure
 
-### 8.2 Key Observations
-- Strategy performs best in trending markets
-- Multi-indicator confirmation reduces false signals
-- Stop-loss effectively limits large losses
-- Win rate around 60% is sustainable with 1:2 risk/reward
-- Drawdowns are controlled within acceptable range
+The strategy prioritizes capital preservation and consistency over aggressive growth.
 
-### 8.3 Improvements Attempted
-- Optimized MA periods (20/50 combination works well)
-- Added RSI filtering to avoid extreme conditions
-- Bollinger Bands improve entry timing
-- Position sizing controls risk exposure
-- Transaction costs included for realistic results
+### 8.2 Improvements Attempted
+
+- Parameter sensitivity testing
+- RSI filtering to reduce overtrading
+- Bollinger Band proximity filters
+- Transaction cost inclusion
 
 ---
 

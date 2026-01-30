@@ -1,188 +1,195 @@
 """
-Data fetcher module for retrieving equity data from the API.
+Data fetcher module for retrieving equity data from the Hackathon API.
+Data is fetched STRICTLY from http://13.201.224.23:8001
 """
 import requests
 import pandas as pd
 from datetime import datetime
 from typing import List, Optional
-import json
+import io
 
 
 class EquityDataFetcher:
-    """Fetch equity data from the provided API endpoint."""
+    """Fetch equity data from the Hackathon API endpoint."""
     
-    def __init__(self, base_url: str = "http://13.201.224.23:8001"):
-        self.base_url = base_url
+    # Hackathon API - STRICT data source
+    BASE_URL = "http://13.201.224.23:8001"
+    
+    def __init__(self):
+        self.base_url = self.BASE_URL
         
     def fetch_equity_data(
         self, 
         symbols: List[str], 
         start_date: str, 
         end_date: str,
-        interval: str = "1d"
+        interval: str = "day"
     ) -> pd.DataFrame:
         """
-        Fetch equity data for given symbols and date range.
+        Fetch equity data for given symbols and date range from Hackathon API.
         
         Args:
             symbols: List of stock symbols (e.g., ['RELIANCE', 'TCS'])
             start_date: Start date in 'YYYY-MM-DD' format
             end_date: End date in 'YYYY-MM-DD' format
-            interval: Data interval (default: '1d' for daily)
+            interval: Data interval ('day' for daily, 'minute' for minute)
             
         Returns:
             DataFrame with columns: Date, Symbol, Open, High, Low, Close, Volume
         """
         all_data = []
         
+        # Calculate days_ago from start_date
+        start_dt = pd.to_datetime(start_date)
+        days_ago = (datetime.now() - start_dt).days + 1  # +1 to include start date
+        
         for symbol in symbols:
             try:
-                print(f"Fetching data for {symbol}...")
-                df = self._fetch_single_symbol(symbol, start_date, end_date, interval)
+                print(f"Fetching data for {symbol} from Hackathon API...")
+                df = self._fetch_from_api(symbol, days_ago, interval)
+                
                 if df is not None and not df.empty:
+                    # Add symbol column
                     df['Symbol'] = symbol
-                    all_data.append(df)
+                    
+                    # Filter by date range
+                    df['Date'] = pd.to_datetime(df['Date'])
+                    df = df[(df['Date'] >= start_date) & (df['Date'] <= end_date)]
+                    
+                    if not df.empty:
+                        all_data.append(df)
+                        print(f"  Successfully fetched {len(df)} records for {symbol}")
+                    else:
+                        print(f"  Warning: No data for {symbol} in date range {start_date} to {end_date}")
                 else:
-                    print(f"Warning: No data received for {symbol}")
+                    print(f"  Warning: No data received for {symbol}")
+                    
             except Exception as e:
-                print(f"Error fetching data for {symbol}: {e}")
+                print(f"  Error fetching data for {symbol}: {e}")
                 continue
         
         if not all_data:
-            raise ValueError("No data could be fetched for any symbols")
+            raise ValueError(
+                f"No data could be fetched from Hackathon API ({self.BASE_URL}). "
+                "Please check API availability and symbol names."
+            )
         
         # Combine all dataframes
         combined_df = pd.concat(all_data, ignore_index=True)
         combined_df = combined_df.sort_values(['Symbol', 'Date']).reset_index(drop=True)
         
-        return combined_df
+        # Ensure required columns are present
+        required_cols = ['Date', 'Symbol', 'Open', 'High', 'Low', 'Close', 'Volume']
+        for col in required_cols:
+            if col not in combined_df.columns:
+                raise ValueError(f"Missing required column: {col}")
+        
+        return combined_df[required_cols]
     
-    def _fetch_single_symbol(
+    def _fetch_from_api(
         self, 
         symbol: str, 
-        start_date: str, 
-        end_date: str,
-        interval: str
+        days_ago: int,
+        interval: str = "day"
     ) -> Optional[pd.DataFrame]:
         """
-        Fetch data for a single symbol.
-        Note: This is a placeholder implementation. The actual API endpoint
-        and parameters need to be adjusted based on the real API documentation.
-        """
-        # Since we don't have direct API documentation, we'll create
-        # a fallback mechanism to use Yahoo Finance or generate sample data
-        try:
-            # Try to use yfinance as fallback for Indian stocks
-            import yfinance as yf
-            
-            # Add .NS suffix for NSE stocks
-            ticker_symbol = f"{symbol}.NS"
-            ticker = yf.Ticker(ticker_symbol)
-            
-            df = ticker.history(start=start_date, end=end_date, interval=interval)
-            
-            if df.empty:
-                print(f"No data from yfinance for {symbol}, generating sample data")
-                return self._generate_sample_data(symbol, start_date, end_date)
-            
-            # Rename columns to match our standard
-            df = df.reset_index()
-            df = df.rename(columns={
-                'Date': 'Date',
-                'Open': 'Open',
-                'High': 'High',
-                'Low': 'Low',
-                'Close': 'Close',
-                'Volume': 'Volume'
-            })
-            
-            # Keep only required columns
-            df = df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume']]
-            
-            return df
-            
-        except ImportError:
-            print(f"yfinance not available, generating sample data for {symbol}")
-            return self._generate_sample_data(symbol, start_date, end_date)
-        except Exception as e:
-            print(f"Error in _fetch_single_symbol for {symbol}: {e}")
-            return self._generate_sample_data(symbol, start_date, end_date)
-    
-    def _generate_sample_data(
-        self, 
-        symbol: str, 
-        start_date: str, 
-        end_date: str
-    ) -> pd.DataFrame:
-        """
-        Generate realistic sample data for demonstration purposes.
-        This creates a trending price series with volatility.
-        """
-        import numpy as np
+        Fetch data for a single symbol from the Hackathon API.
         
-        # Convert dates
-        start = pd.to_datetime(start_date)
-        end = pd.to_datetime(end_date)
+        API Endpoint: POST /fetch-data
+        Returns: Excel file (.xlsx) with OHLCV data
+        """
+        url = f"{self.base_url}/fetch-data"
         
-        # Generate date range (business days only)
-        dates = pd.bdate_range(start=start, end=end)
-        
-        # Set base price based on symbol
-        base_prices = {
-            'RELIANCE': 2500,
-            'TCS': 3500,
-            'INFY': 1500,
-            'HDFCBANK': 1600,
-            'ICICIBANK': 900,
-            'SBIN': 600,
-            'BHARTIARTL': 800,
-            'ITC': 400,
-            'KOTAKBANK': 1800,
-            'LT': 2200
+        # Request payload
+        payload = {
+            "asset_class": "equity",
+            "stocks": [symbol],
+            "indexes": [],
+            "interval": interval,
+            "days_ago": days_ago,
+            "equity_source": "zerodha"
         }
         
-        base_price = base_prices.get(symbol, 1000)
-        
-        # Generate random walk with trend
-        np.random.seed(hash(symbol) % 2**32)
-        n_days = len(dates)
-        
-        # Returns with slight upward bias
-        returns = np.random.normal(0.0005, 0.02, n_days)
-        
-        # Calculate prices
-        close_prices = base_price * (1 + returns).cumprod()
-        
-        # Generate OHLC
-        daily_range = np.random.uniform(0.01, 0.03, n_days)
-        
-        high_prices = close_prices * (1 + daily_range / 2)
-        low_prices = close_prices * (1 - daily_range / 2)
-        open_prices = np.roll(close_prices, 1)
-        open_prices[0] = base_price
-        
-        # Add some randomness to open prices
-        open_prices = open_prices * (1 + np.random.normal(0, 0.005, n_days))
-        
-        # Generate volume
-        base_volume = np.random.randint(1000000, 5000000)
-        volumes = np.random.randint(
-            int(base_volume * 0.5), 
-            int(base_volume * 1.5), 
-            n_days
-        )
-        
-        # Create DataFrame
-        df = pd.DataFrame({
-            'Date': dates,
-            'Open': open_prices,
-            'High': high_prices,
-            'Low': low_prices,
-            'Close': close_prices,
-            'Volume': volumes
-        })
-        
-        return df
+        try:
+            response = requests.post(url, json=payload, timeout=120)
+            
+            if response.status_code == 200 and len(response.content) > 100:
+                return self._parse_excel_response(response.content, symbol)
+            elif response.status_code == 404:
+                print(f"    No data available for {symbol}")
+                return None
+            else:
+                error_msg = response.text[:200] if response.text else "Unknown error"
+                print(f"    API error {response.status_code}: {error_msg}")
+                return None
+                
+        except requests.exceptions.Timeout:
+            print(f"    Request timed out for {symbol}")
+            return None
+        except requests.exceptions.ConnectionError:
+            print(f"    Connection error to API")
+            return None
+        except Exception as e:
+            print(f"    Error: {e}")
+            return None
+    
+    def _parse_excel_response(self, content: bytes, symbol: str) -> Optional[pd.DataFrame]:
+        """Parse Excel file response into DataFrame."""
+        try:
+            # Read Excel file from bytes
+            df = pd.read_excel(io.BytesIO(content), engine='openpyxl')
+            
+            if df.empty:
+                return None
+            
+            # Standardize column names
+            column_map = {
+                'date': 'Date',
+                'time': 'Time',
+                'tradingsymbol': 'TradingSymbol',
+                'open': 'Open',
+                'high': 'High',
+                'low': 'Low',
+                'close': 'Close',
+                'volume': 'Volume',
+                'historical_volatility': 'HistoricalVolatility'
+            }
+            
+            # Rename columns (case-insensitive)
+            df.columns = [column_map.get(col.lower(), col) for col in df.columns]
+            
+            # For minute data, we may need to aggregate to daily
+            if 'Time' in df.columns:
+                # This is minute data - aggregate to daily
+                df['Date'] = pd.to_datetime(df['Date'])
+                
+                # Group by date and aggregate OHLCV
+                daily_df = df.groupby('Date').agg({
+                    'Open': 'first',      # First open of the day
+                    'High': 'max',        # Highest high
+                    'Low': 'min',         # Lowest low
+                    'Close': 'last',      # Last close of the day
+                    'Volume': 'sum'       # Total volume
+                }).reset_index()
+                
+                return daily_df
+            else:
+                # Already daily data
+                df['Date'] = pd.to_datetime(df['Date'])
+                
+                # Keep only required columns
+                required = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
+                available = [col for col in required if col in df.columns]
+                
+                # Ensure Volume exists
+                if 'Volume' not in df.columns:
+                    df['Volume'] = 0
+                    
+                return df[available]
+                
+        except Exception as e:
+            print(f"    Error parsing Excel response: {e}")
+            return None
 
 
 def fetch_equity_data(
@@ -191,10 +198,12 @@ def fetch_equity_data(
     end_date: str
 ) -> pd.DataFrame:
     """
-    Convenience function to fetch equity data.
+    Convenience function to fetch equity data from Hackathon API.
+    
+    Data Source: http://13.201.224.23:8001 (STRICT)
     
     Args:
-        symbols: List of stock symbols
+        symbols: List of stock symbols (e.g., ['RELIANCE', 'TCS'])
         start_date: Start date in 'YYYY-MM-DD' format
         end_date: End date in 'YYYY-MM-DD' format
         
@@ -207,8 +216,23 @@ def fetch_equity_data(
 
 if __name__ == "__main__":
     # Test the fetcher
-    symbols = ['RELIANCE', 'TCS', 'INFY']
-    data = fetch_equity_data(symbols, '2023-01-01', '2024-01-01')
-    print(data.head())
-    print(f"\nTotal records: {len(data)}")
-    print(f"\nSymbols: {data['Symbol'].unique()}")
+    print("=" * 60)
+    print("Testing Hackathon API Data Fetcher")
+    print(f"API Endpoint: {EquityDataFetcher.BASE_URL}")
+    print("=" * 60)
+    
+    symbols = ['RELIANCE']
+    start = '2026-01-20'
+    end = '2026-01-30'
+    
+    try:
+        data = fetch_equity_data(symbols, start, end)
+        print(f"\nData fetched successfully!")
+        print(f"Total records: {len(data)}")
+        print(f"Columns: {list(data.columns)}")
+        print(f"\nSample data:")
+        print(data.head(10).to_string())
+    except Exception as e:
+        print(f"\nError: {e}")
+        import traceback
+        traceback.print_exc()
