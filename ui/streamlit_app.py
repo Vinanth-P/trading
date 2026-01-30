@@ -11,13 +11,17 @@ import sys
 from pathlib import Path
 
 # Add parent directory to path for imports
-sys.path.append(str(Path(__file__).parent.parent))
+parent_dir = Path(__file__).parent.parent
+if str(parent_dir) not in sys.path:
+    sys.path.insert(0, str(parent_dir))
 
 from data.fetcher import fetch_equity_data
 from data.preprocessor import preprocess_data
+from data.futures_fetcher import load_futures_data, get_available_date_range
 from strategy.indicators import add_indicators
 from strategy.signals import generate_signals
 from backtesting.engine import run_backtest
+from backtesting.futures_engine import run_futures_backtest
 from backtesting.metrics import PerformanceMetrics
 
 # Page configuration
@@ -113,92 +117,167 @@ st.markdown("**Multi-Indicator Momentum Strategy** | Equity Markets")
 # Sidebar controls
 st.sidebar.markdown("## ⚙️ Configuration")
 
-# Stock selection
-st.sidebar.markdown("### 📊 Select Stocks")
-available_stocks = [
-    'RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'ICICIBANK',
-    'SBIN', 'BHARTIARTL', 'ITC', 'KOTAKBANK', 'LT'
-]
-
-selected_stocks = st.sidebar.multiselect(
-    "Choose stocks to analyze",
-    options=available_stocks,
-    default=['RELIANCE'],
-    help="Select 1-5 stocks for backtesting"
+# Market Type Selection
+st.sidebar.markdown("### 📊 Market Type")
+market_type = st.sidebar.radio(
+    "Select Market",
+    options=["Equity", "Futures"],
+    horizontal=True,
+    help="Choose between Equity trading (stocks) or Futures trading"
 )
 
-# Date range
-st.sidebar.markdown("### 📅 Date Range")
-col1, col2 = st.sidebar.columns(2)
-with col1:
-    start_date = st.date_input(
-        "Start Date",
-        value=pd.to_datetime('2023-01-01')
+st.sidebar.markdown("---")
+
+# Stock selection (only for Equity mode)
+if market_type == "Equity":
+    st.sidebar.markdown("### 📊 Select Stocks")
+    available_stocks = [
+        'RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'ICICIBANK',
+        'SBIN', 'BHARTIARTL', 'ITC', 'KOTAKBANK', 'LT'
+    ]
+    
+    selected_stocks = st.sidebar.multiselect(
+        "Choose stocks to analyze",
+        options=available_stocks,
+        default=['RELIANCE'],
+        help="Select 1-5 stocks for backtesting"
     )
-with col2:
-    end_date = st.date_input(
-        "End Date",
-        value=pd.to_datetime('2024-01-01')
+    
+    # Date range
+    st.sidebar.markdown("### 📅 Date Range")
+    col1, col2 = st.sidebar.columns(2)
+    with col1:
+        start_date = st.date_input(
+            "Start Date",
+            value=pd.to_datetime('2023-01-01')
+        )
+    with col2:
+        end_date = st.date_input(
+            "End Date",
+            value=pd.to_datetime('2024-01-01')
+        )
+    
+    # Strategy parameters
+    st.sidebar.markdown("### 🎯 Strategy Parameters")
+    
+    with st.sidebar.expander("Moving Averages", expanded=False):
+        short_ma = st.slider("Short MA Period", 5, 30, 10)
+        long_ma = st.slider("Long MA Period", 20, 60, 30)
+    
+    with st.sidebar.expander("RSI", expanded=False):
+        rsi_period = st.slider("RSI Period", 7, 21, 14)
+        rsi_oversold = st.slider("RSI Oversold", 20, 40, 30)
+        rsi_overbought = st.slider("RSI Overbought", 60, 80, 70)
+    
+    with st.sidebar.expander("MACD", expanded=False):
+        macd_fast = st.slider("MACD Fast", 8, 16, 12)
+        macd_slow = st.slider("MACD Slow", 20, 30, 26)
+        macd_signal = st.slider("MACD Signal", 7, 12, 9)
+    
+    # Risk management for Equity
+    st.sidebar.markdown("### ⚠️ Risk Management")
+    initial_capital = st.sidebar.number_input(
+        "Initial Capital (₹)",
+        min_value=100000,
+        max_value=10000000,
+        value=1000000,
+        step=100000,
+        format="%d"
     )
-
-# Strategy parameters
-st.sidebar.markdown("### 🎯 Strategy Parameters")
-
-with st.sidebar.expander("Moving Averages", expanded=False):
-    short_ma = st.slider("Short MA Period", 5, 30, 10)
-    long_ma = st.slider("Long MA Period", 20, 60, 30)
-
-with st.sidebar.expander("RSI", expanded=False):
-    rsi_period = st.slider("RSI Period", 7, 21, 14)
-    rsi_oversold = st.slider("RSI Oversold", 20, 40, 30)
-    rsi_overbought = st.slider("RSI Overbought", 60, 80, 70)
-
-with st.sidebar.expander("MACD", expanded=False):
-    macd_fast = st.slider("MACD Fast", 8, 16, 12)
-    macd_slow = st.slider("MACD Slow", 20, 30, 26)
-    macd_signal = st.slider("MACD Signal", 7, 12, 9)
-
-# Risk management
-st.sidebar.markdown("### ⚠️ Risk Management")
-initial_capital = st.sidebar.number_input(
-    "Initial Capital (₹)",
-    min_value=100000,
-    max_value=10000000,
-    value=1000000,
-    step=100000,
-    format="%d"
-)
-
-position_size = st.sidebar.slider(
-    "Position Size (%)",
-    min_value=5,
-    max_value=50,
-    value=15,
-    help="Percentage of portfolio per trade"
-) / 100
-
-max_positions = st.sidebar.slider(
-    "Max Concurrent Positions",
-    min_value=1,
-    max_value=5,
-    value=4
-)
-
-stop_loss = st.sidebar.slider(
-    "Stop Loss (%)",
-    min_value=1,
-    max_value=15,
-    value=7,
-    help="Percentage below entry price"
-) / 100
-
-take_profit = st.sidebar.slider(
-    "Take Profit (%)",
+    
+    position_size = st.sidebar.slider(
+        "Position Size (%)",
+        min_value=5,
+        max_value=50,
+        value=15,
+        help="Percentage of portfolio per trade"
+    ) / 100
+    
+    max_positions = st.sidebar.slider(
+        "Max Concurrent Positions",
+        min_value=1,
+        max_value=5,
+        value=4
+    )
+    
+    stop_loss = st.sidebar.slider(
+        "Stop Loss (%)",
+        min_value=1,
+        max_value=15,
+        value=7,
+        help="Percentage below entry price"
+    ) / 100
+    
+    take_profit = st.sidebar.slider(
+        "Take Profit (%)",
     min_value=5,
     max_value=30,
     value=15,
     help="Percentage above entry price"
 ) / 100
+
+else:  # Futures mode
+    st.sidebar.markdown("### 🎯 Futures Trading")
+    st.sidebar.info("📊 Trading NIFTY Futures with Smart Money Concepts")
+    
+    # Strategy parameters for Futures
+    st.sidebar.markdown("### 🎯 Strategy Parameters")
+    
+    with st.sidebar.expander("Risk-Reward Settings", expanded=True):
+        min_rr = st.slider(
+            "Minimum R:R Ratio",
+            min_value=1.0,
+            max_value=3.0,
+            value=1.1,
+            step=0.1,
+            help="Minimum risk-reward ratio for trade entry"
+        )
+        
+        min_stop_points = st.slider(
+            "Min Stop Distance (pts)",
+            min_value=5,
+            max_value=30,
+            value=10,
+            help="Minimum stop loss distance in points"
+        )
+    
+    with st.sidebar.expander("Trade Management", expanded=True):
+        max_daily_losses = st.slider(
+            "Max Daily Losses",
+            min_value=1,
+            max_value=5,
+            value=3,
+            help="Maximum losing trades per day before stopping"
+        )
+        
+        risk_percent_bullish = st.slider(
+            "Risk % (Biased)",
+            min_value=0.5,
+            max_value=5.0,
+            value=2.0,
+            step=0.5,
+            help="Risk per trade when market bias is clear"
+        ) / 100
+        
+        risk_percent_neutral = st.slider(
+            "Risk % (Neutral)",
+            min_value=0.5,
+            max_value=3.0,
+            value=1.0,
+            step=0.5,
+            help="Risk per trade in neutral market"
+        ) / 100
+    
+    # Capital for Futures
+    st.sidebar.markdown("### 💰 Capital")
+    initial_capital = st.sidebar.number_input(
+        "Initial Capital (₹)",
+        min_value=100000,
+        max_value=10000000,
+        value=1000000,
+        step=100000,
+        format="%d"
+    )
 
 # Run backtest button
 st.sidebar.markdown("---")
@@ -216,77 +295,125 @@ if 'metrics' not in st.session_state:
 
 # Run backtest
 if run_backtest_button:
-    if not selected_stocks:
-        st.error("⚠️ Please select at least one stock!")
-    else:
-        with st.spinner('🔄 Fetching data and running backtest...'):
+    if market_type == "Equity":
+        if not selected_stocks:
+            st.error("⚠️ Please select at least one stock!")
+        else:
+            with st.spinner('🔄 Fetching data and running backtest...'):
+                try:
+                    # Fetch data
+                    progress_bar = st.progress(0)
+                    st.info("📥 Fetching equity data...")
+                    progress_bar.progress(20)
+                    
+                    raw_data = fetch_equity_data(
+                        selected_stocks,
+                        start_date.strftime('%Y-%m-%d'),
+                        end_date.strftime('%Y-%m-%d')
+                    )
+                    
+                    # Preprocess
+                    st.info("🧹 Preprocessing data...")
+                    progress_bar.progress(40)
+                    clean_data = preprocess_data(raw_data)
+                    
+                    # Add indicators
+                    st.info("📊 Calculating technical indicators...")
+                    progress_bar.progress(60)
+                    df_with_indicators = add_indicators(
+                        clean_data,
+                        short_ma=short_ma,
+                        long_ma=long_ma,
+                        rsi_period=rsi_period,
+                        macd_fast=macd_fast,
+                        macd_slow=macd_slow,
+                        macd_signal=macd_signal
+                    )
+                    
+                    # Generate signals
+                    st.info("🎯 Generating trading signals...")
+                    progress_bar.progress(70)
+                    df_with_signals = generate_signals(
+                        df_with_indicators,
+                        rsi_oversold=rsi_oversold,
+                        rsi_overbought=rsi_overbought
+                    )
+                    
+                    # Run backtest
+                    st.info("⚙️ Running backtest simulation...")
+                    progress_bar.progress(85)
+                    results = run_backtest(
+                        df_with_signals,
+                        initial_capital=initial_capital,
+                        position_size=position_size,
+                        max_positions=max_positions,
+                        stop_loss_pct=stop_loss,
+                        take_profit_pct=take_profit
+                    )
+                    
+                    # Calculate metrics
+                    metrics_calc = PerformanceMetrics(results)
+                    metrics = metrics_calc.calculate_all_metrics()
+                    
+                    progress_bar.progress(100)
+                    
+                    # Store in session state
+                    st.session_state.backtest_results = results
+                    st.session_state.metrics = metrics
+                    st.session_state.market_type = "Equity"
+                    
+                    st.success("✅ Backtest completed successfully!")
+                    
+                except Exception as e:
+                    st.error(f"❌ Error during backtest: {str(e)}")
+                    import traceback
+                    st.code(traceback.format_exc())
+    
+    else:  # Futures mode
+        with st.spinner('🔄 Loading futures data and running backtest...'):
             try:
-                # Fetch data
                 progress_bar = st.progress(0)
-                st.info("📥 Fetching equity data...")
-                progress_bar.progress(20)
+                st.info("📥 Loading futures data...")
+                progress_bar.progress(30)
                 
-                raw_data = fetch_equity_data(
-                    selected_stocks,
-                    start_date.strftime('%Y-%m-%d'),
-                    end_date.strftime('%Y-%m-%d')
-                )
+                # Run futures backtest
+                st.info("⚙️ Running futures backtest with smart money concepts...")
+                progress_bar.progress(50)
                 
-                # Preprocess
-                st.info("🧹 Preprocessing data...")
-                progress_bar.progress(40)
-                clean_data = preprocess_data(raw_data)
-                
-                # Add indicators
-                st.info("📊 Calculating technical indicators...")
-                progress_bar.progress(60)
-                df_with_indicators = add_indicators(
-                    clean_data,
-                    short_ma=short_ma,
-                    long_ma=long_ma,
-                    rsi_period=rsi_period,
-                    macd_fast=macd_fast,
-                    macd_slow=macd_slow,
-                    macd_signal=macd_signal
-                )
-                
-                # Generate signals
-                st.info("🎯 Generating trading signals...")
-                progress_bar.progress(70)
-                df_with_signals = generate_signals(
-                    df_with_indicators,
-                    rsi_oversold=rsi_oversold,
-                    rsi_overbought=rsi_overbought
-                )
-                
-                # Run backtest
-                st.info("⚙️ Running backtest simulation...")
-                progress_bar.progress(85)
-                results = run_backtest(
-                    df_with_signals,
+                results = run_futures_backtest(
                     initial_capital=initial_capital,
-                    position_size=position_size,
-                    max_positions=max_positions,
-                    stop_loss_pct=stop_loss,
-                    take_profit_pct=take_profit
+                    min_rr=min_rr,
+                    max_daily_losses=max_daily_losses,
+                    min_stop_points=min_stop_points,
+                    risk_percent_bullish=risk_percent_bullish,
+                    risk_percent_neutral=risk_percent_neutral
                 )
                 
-                # Calculate metrics
-                metrics_calc = PerformanceMetrics(results)
-                metrics = metrics_calc.calculate_all_metrics()
+                # Calculate metrics for futures
+                st.info("📊 Calculating performance metrics...")
+                progress_bar.progress(85)
+                
+                if not results['trade_history'].empty:
+                    metrics_calc = PerformanceMetrics(results)
+                    metrics = metrics_calc.calculate_all_metrics()
+                else:
+                    # No trades executed
+                    metrics = {}
                 
                 progress_bar.progress(100)
                 
                 # Store in session state
                 st.session_state.backtest_results = results
                 st.session_state.metrics = metrics
+                st.session_state.market_type = "Futures"
                 
-                st.success("✅ Backtest completed successfully!")
+                st.success("✅ Futures backtest completed successfully!")
                 
             except Exception as e:
-                st.error(f"❌ Error during backtest: {str(e)}")
+                st.error(f"❌ Error during futures backtest: {str(e)}")
                 import traceback
                 st.code(traceback.format_exc())
+
 
 # Display results
 if st.session_state.backtest_results is not None:
@@ -347,11 +474,20 @@ if st.session_state.backtest_results is not None:
     with tab1:
         st.markdown("### Price Charts with Trade Signals")
         
-        # Select stock to display
-        display_stock = st.selectbox(
-            "Select stock to view",
-            options=selected_stocks
-        )
+        # Check market type and show appropriate selector
+        market_mode = st.session_state.get('market_type', 'Equity')
+        
+        if market_mode == "Equity":
+            # Get selected stocks from results data
+            available_symbols = results['data']['Symbol'].unique().tolist()
+            display_stock = st.selectbox(
+                "Select stock to view",
+                options=available_symbols
+            )
+        else:
+            # Futures mode - only one symbol
+            display_stock = "NIFTY_FUT"
+            st.info("📊 Viewing NIFTY Futures")
         
         if display_stock:
             stock_data = results['data'][results['data']['Symbol'] == display_stock].copy()
@@ -373,156 +509,161 @@ if st.session_state.backtest_results is not None:
             # Candlestick
             fig.add_trace(
                 go.Candlestick(
-                    x=stock_data['Date'],
-                    open=stock_data['Open'],
-                    high=stock_data['High'],
-                    low=stock_data['Low'],
-                    close=stock_data['Close'],
+                    x=stock_data['datetime'] if 'datetime' in stock_data.columns else stock_data.get('Date', stock_data.index),
+                    open=stock_data['open'] if 'open' in stock_data.columns else stock_data.get('Open'),
+                    high=stock_data['high'] if 'high' in stock_data.columns else stock_data.get('High'),
+                    low=stock_data['low'] if 'low' in stock_data.columns else stock_data.get('Low'),
+                    close=stock_data['close'] if 'close' in stock_data.columns else stock_data.get('Close'),
                     name='Price'
                 ),
                 row=1, col=1
             )
             
-            # Moving averages
-            fig.add_trace(
-                go.Scatter(
-                    x=stock_data['Date'],
-                    y=stock_data['MA_Short'],
-                    name=f'MA{short_ma}',
-                    line=dict(color='cyan', width=1)
-                ),
-                row=1, col=1
-            )
+            # Only add indicators for equity mode
+            if market_mode == "Equity" and 'MA_Short' in stock_data.columns:
+                # Moving averages
+                fig.add_trace(
+                    go.Scatter(
+                        x=stock_data['Date'],
+                        y=stock_data['MA_Short'],
+                        name=f'MA{short_ma}',
+                        line=dict(color='cyan', width=1)
+                    ),
+                    row=1, col=1
+                )
+                
+                fig.add_trace(
+                    go.Scatter(
+                        x=stock_data['Date'],
+                        y=stock_data['MA_Long'],
+                        name=f'MA{long_ma}',
+                        line=dict(color='orange', width=1)
+                    ),
+                    row=1, col=1
+                )
+                
+                # Bollinger Bands
+                fig.add_trace(
+                    go.Scatter(
+                        x=stock_data['Date'],
+                        y=stock_data['BB_Upper'],
+                        name='BB Upper',
+                        line=dict(color='gray', width=1, dash='dash'),
+                        opacity=0.5
+                    ),
+                    row=1, col=1
+                )
+                
+                fig.add_trace(
+                    go.Scatter(
+                        x=stock_data['Date'],
+                        y=stock_data['BB_Lower'],
+                        name='BB Lower',
+                        line=dict(color='gray', width=1, dash='dash'),
+                        opacity=0.5,
+                        fill='tonexty'
+                    ),
+                    row=1, col=1
+                )
+                
+                # Buy signals
+                buy_signals = stock_data[stock_data['Signal'] == 1]
+                fig.add_trace(
+                    go.Scatter(
+                        x=buy_signals['Date'],
+                        y=buy_signals['Close'],
+                        mode='markers',
+                        name='Buy Signal',
+                        marker=dict(
+                            symbol='triangle-up',
+                            size=15,
+                            color='#00ff88',
+                            line=dict(color='white', width=1)
+                        )
+                    ),
+                    row=1, col=1
+                )
+                
+                # Sell signals
+                sell_signals = stock_data[stock_data['Signal'] == -1]
+                fig.add_trace(
+                    go.Scatter(
+                        x=sell_signals['Date'],
+                        y=sell_signals['Close'],
+                        mode='markers',
+                        name='Sell Signal',
+                        marker=dict(
+                            symbol='triangle-down',
+                            size=15,
+                            color='#ff3366',
+                            line=dict(color='white', width=1)
+                        )
+                    ),
+                    row=1, col=1
+                )
+                
+                # RSI
+                fig.add_trace(
+                    go.Scatter(
+                        x=stock_data['Date'],
+                        y=stock_data['RSI'],
+                        name='RSI',
+                        line=dict(color='purple', width=2)
+                    ),
+                    row=2, col=1
+                )
+                
+                # RSI levels
+                fig.add_hline(y=70, line_dash="dash", line_color="red", opacity=0.5, row=2, col=1)
+                fig.add_hline(y=30, line_dash="dash", line_color="green", opacity=0.5, row=2, col=1)
+                
+                # MACD
+                fig.add_trace(
+                    go.Scatter(
+                        x=stock_data['Date'],
+                        y=stock_data['MACD'],
+                        name='MACD',
+                        line=dict(color='blue', width=2)
+                    ),
+                    row=3, col=1
+                )
+                
+                fig.add_trace(
+                    go.Scatter(
+                        x=stock_data['Date'],
+                        y=stock_data['MACD_Signal'],
+                        name='Signal',
+                        line=dict(color='red', width=2)
+                    ),
+                    row=3, col=1
+                )
+                
+                # MACD Histogram
+                colors = ['green' if val >= 0 else 'red' for val in stock_data['MACD_Hist']]
+                fig.add_trace(
+                    go.Bar(
+                        x=stock_data['Date'],
+                        y=stock_data['MACD_Hist'],
+                        name='Histogram',
+                        marker_color=colors,
+                        opacity=0.5
+                    ),
+                    row=3, col=1
+                )
             
-            fig.add_trace(
-                go.Scatter(
-                    x=stock_data['Date'],
-                    y=stock_data['MA_Long'],
-                    name=f'MA{long_ma}',
-                    line=dict(color='orange', width=1)
-                ),
-                row=1, col=1
-            )
-            
-            # Bollinger Bands
-            fig.add_trace(
-                go.Scatter(
-                    x=stock_data['Date'],
-                    y=stock_data['BB_Upper'],
-                    name='BB Upper',
-                    line=dict(color='gray', width=1, dash='dash'),
-                    opacity=0.5
-                ),
-                row=1, col=1
-            )
-            
-            fig.add_trace(
-                go.Scatter(
-                    x=stock_data['Date'],
-                    y=stock_data['BB_Lower'],
-                    name='BB Lower',
-                    line=dict(color='gray', width=1, dash='dash'),
-                    opacity=0.5,
-                    fill='tonexty'
-                ),
-                row=1, col=1
-            )
-            
-            # Buy signals
-            buy_signals = stock_data[stock_data['Signal'] == 1]
-            fig.add_trace(
-                go.Scatter(
-                    x=buy_signals['Date'],
-                    y=buy_signals['Close'],
-                    mode='markers',
-                    name='Buy Signal',
-                    marker=dict(
-                        symbol='triangle-up',
-                        size=15,
-                        color='#00ff88',
-                        line=dict(color='white', width=1)
-                    )
-                ),
-                row=1, col=1
-            )
-            
-            # Sell signals
-            sell_signals = stock_data[stock_data['Signal'] == -1]
-            fig.add_trace(
-                go.Scatter(
-                    x=sell_signals['Date'],
-                    y=sell_signals['Close'],
-                    mode='markers',
-                    name='Sell Signal',
-                    marker=dict(
-                        symbol='triangle-down',
-                        size=15,
-                        color='#ff3366',
-                        line=dict(color='white', width=1)
-                    )
-                ),
-                row=1, col=1
-            )
-            
-            # RSI
-            fig.add_trace(
-                go.Scatter(
-                    x=stock_data['Date'],
-                    y=stock_data['RSI'],
-                    name='RSI',
-                    line=dict(color='purple', width=2)
-                ),
-                row=2, col=1
-            )
-            
-            # RSI levels
-            fig.add_hline(y=70, line_dash="dash", line_color="red", opacity=0.5, row=2, col=1)
-            fig.add_hline(y=30, line_dash="dash", line_color="green", opacity=0.5, row=2, col=1)
-            
-            # MACD
-            fig.add_trace(
-                go.Scatter(
-                    x=stock_data['Date'],
-                    y=stock_data['MACD'],
-                    name='MACD',
-                    line=dict(color='blue', width=2)
-                ),
-                row=3, col=1
-            )
-            
-            fig.add_trace(
-                go.Scatter(
-                    x=stock_data['Date'],
-                    y=stock_data['MACD_Signal'],
-                    name='Signal',
-                    line=dict(color='red', width=2)
-                ),
-                row=3, col=1
-            )
-            
-            # MACD Histogram
-            colors = ['green' if val >= 0 else 'red' for val in stock_data['MACD_Hist']]
-            fig.add_trace(
-                go.Bar(
-                    x=stock_data['Date'],
-                    y=stock_data['MACD_Hist'],
-                    name='Histogram',
-                    marker_color=colors,
-                    opacity=0.5
-                ),
-                row=3, col=1
-            )
-            
-            # Volume
-            fig.add_trace(
-                go.Bar(
-                    x=stock_data['Date'],
-                    y=stock_data['Volume'],
-                    name='Volume',
-                    marker_color='rgba(0, 212, 255, 0.5)'
-                ),
-                row=4, col=1
-            )
+            # Volume (available for both modes)
+            volume_col = 'volume' if 'volume' in stock_data.columns else 'Volume'
+            if volume_col in stock_data.columns:
+                x_col = 'datetime' if 'datetime' in stock_data.columns else 'Date'
+                fig.add_trace(
+                    go.Bar(
+                        x=stock_data[x_col],
+                        y=stock_data[volume_col] if volume_col in stock_data.columns else None,
+                        name='Volume',
+                        marker_color='rgba(0, 212, 255, 0.5)'
+                    ),
+                    row=4, col=1
+                )
             
             # Update layout
             fig.update_layout(
@@ -535,8 +676,9 @@ if st.session_state.backtest_results is not None:
             
             fig.update_xaxes(title_text="Date", row=4, col=1)
             fig.update_yaxes(title_text="Price (₹)", row=1, col=1)
-            fig.update_yaxes(title_text="RSI", row=2, col=1, range=[0, 100])
-            fig.update_yaxes(title_text="MACD", row=3, col=1)
+            if market_mode == "Equity":
+                fig.update_yaxes(title_text="RSI", row=2, col=1, range=[0, 100])
+                fig.update_yaxes(title_text="MACD", row=3, col=1)
             fig.update_yaxes(title_text="Volume", row=4, col=1)
             
             st.plotly_chart(fig, use_container_width=True)
