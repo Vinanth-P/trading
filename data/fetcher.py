@@ -7,6 +7,11 @@ import pandas as pd
 from datetime import datetime
 from typing import List, Optional
 import io
+import os
+
+
+# Configuration
+USE_MOCK_DATA_FALLBACK = os.getenv('USE_MOCK_DATA', 'true').lower() == 'true'
 
 
 class EquityDataFetcher:
@@ -48,6 +53,17 @@ class EquityDataFetcher:
                 print(f"Fetching data for {symbol} from Hackathon API...")
                 df = self._fetch_from_api(symbol, days_ago, interval)
                 
+                # If no data with calculated days_ago, try with larger windows
+                if df is None or df.empty:
+                    print(f"  Retrying with different date ranges...")
+                    for retry_days in [365, 730, 1000]:
+                        if retry_days <= days_ago:
+                            continue  # Skip if we already tried this or smaller
+                        print(f"  Trying days_ago={retry_days}...")
+                        df = self._fetch_from_api(symbol, retry_days, interval)
+                        if df is not None and not df.empty:
+                            break
+                
                 if df is not None and not df.empty:
                     # Add symbol column
                     df['Symbol'] = symbol
@@ -69,10 +85,39 @@ class EquityDataFetcher:
                 continue
         
         if not all_data:
+            # Try mock data fallback if enabled
+            if USE_MOCK_DATA_FALLBACK:
+                print(f"\n⚠️  API returned no data. Falling back to mock data generation...")
+                print(f"    (Set environment variable USE_MOCK_DATA=false to disable this)")
+                
+                try:
+                    from data.mock_data import generate_mock_equity_data
+                    print(f"    Generating synthetic data for {', '.join(symbols)}...")
+                    mock_df = generate_mock_equity_data(symbols, start_date, end_date)
+                    mock_df.attrs['is_mock_data'] = True  # Mark as mock data
+                    print(f"    ✓ Generated {len(mock_df)} records of mock data")
+                    return mock_df
+                except Exception as e:
+                    print(f"    ✗ Failed to generate mock data: {e}")
+                    # Fall through to raise the original error
+            
             raise ValueError(
-                f"No data could be fetched from Hackathon API ({self.BASE_URL}). "
-                "Please check API availability and symbol names."
+                f"\n❌ No data could be fetched from Hackathon API ({self.BASE_URL}).\n\n"
+                f"Attempted to fetch data for: {', '.join(symbols)}\n"
+                f"Date range: {start_date} to {end_date}\n"
+                f"Days requested: {days_ago}\n\n"
+                f"Possible causes:\n"
+                f"  1. The API does not have data for these specific symbols\n"
+                f"  2. The requested date range is outside available data\n"
+                f"  3. The API service may be temporarily unavailable\n\n"
+                f"Troubleshooting:\n"
+                f"  - Try different stock symbols (e.g., SBIN, TCS, INFY)\n"
+                f"  - Try a more recent date range\n"
+                f"  - Check API docs at: {self.BASE_URL}/docs\n"
+                f"  - Verify API status by visiting: {self.BASE_URL}\n"
+                f"  - Enable mock data fallback: USE_MOCK_DATA=true"
             )
+
         
         # Combine all dataframes
         combined_df = pd.concat(all_data, ignore_index=True)
@@ -111,26 +156,35 @@ class EquityDataFetcher:
         }
         
         try:
+            print(f"    Requesting {symbol} with days_ago={days_ago}")
             response = requests.post(url, json=payload, timeout=120)
             
-            if response.status_code == 200 and len(response.content) > 100:
-                return self._parse_excel_response(response.content, symbol)
+            if response.status_code == 200:
+                if len(response.content) > 100:
+                    print(f"    ✓ Received {len(response.content)} bytes")
+                    return self._parse_excel_response(response.content, symbol)
+                else:
+                    # Small response - might be error message
+                    msg = response.text if response.text else response.content.decode('utf-8', errors='ignore')
+                    print(f"    ⚠ Response too small ({len(response.content)} bytes): {msg[:100]}")
+                    return None
             elif response.status_code == 404:
-                print(f"    No data available for {symbol}")
+                msg = response.text if response.text else "Data not available"
+                print(f"    ✗ No data available for {symbol}: {msg[:100]}")
                 return None
             else:
                 error_msg = response.text[:200] if response.text else "Unknown error"
-                print(f"    API error {response.status_code}: {error_msg}")
+                print(f"    ✗ API error {response.status_code}: {error_msg}")
                 return None
                 
         except requests.exceptions.Timeout:
-            print(f"    Request timed out for {symbol}")
+            print(f"    ✗ Request timed out for {symbol}")
             return None
         except requests.exceptions.ConnectionError:
-            print(f"    Connection error to API")
+            print(f"    ✗ Connection error to API")
             return None
         except Exception as e:
-            print(f"    Error: {e}")
+            print(f"    ✗ Error: {e}")
             return None
     
     def _parse_excel_response(self, content: bytes, symbol: str) -> Optional[pd.DataFrame]:

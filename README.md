@@ -91,9 +91,11 @@ streamlit run ui/streamlit_app.py
 ## 📈 Features
 
 ### Data Components
-- Equity data fetching from API (with fallback sample generation)
+- **Equity data fetching** from Hackathon API (with mock data fallback)
+- **Excel file upload** - Upload your own custom trading data
 - Data preprocessing and validation
 - Outlier removal and missing value handling
+- Sample Excel template generator
 
 ### Strategy Components
 - Technical indicators: MA, RSI, MACD, Bollinger Bands, ATR

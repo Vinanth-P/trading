@@ -54,18 +54,82 @@ st.sidebar.markdown("---")
 
 # Stock selection (only for Equity mode)
 if market_type == "Equity":
-    st.sidebar.markdown("### 📊 Select Stocks")
-    available_stocks = [
-        'RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'ICICIBANK',
-        'SBIN', 'BHARTIARTL', 'ITC', 'KOTAKBANK', 'LT'
-    ]
-    
-    selected_stocks = st.sidebar.multiselect(
-        "Choose stocks to analyze",
-        options=available_stocks,
-        default=['RELIANCE'],
-        help="Select 1-5 stocks for backtesting"
+    # Data Source Selection
+    st.sidebar.markdown("### 📁 Data Source")
+    data_source = st.sidebar.radio(
+        "Choose data source",
+        options=["API/Mock Data", "Upload Excel"],
+        horizontal=True,
+        help="Use API data or upload your own Excel file"
     )
+    
+    uploaded_file = None
+    selected_stocks = []
+    
+    if data_source == "Upload Excel":
+        st.sidebar.markdown("#### 📤 Upload Data File")
+        uploaded_file = st.sidebar.file_uploader(
+            "Choose Excel file",
+            type=['xlsx', 'xls'],
+            help="Upload Excel file with columns: Date, Symbol, Open, High, Low, Close, Volume"
+        )
+        
+        if uploaded_file is not None:
+            st.sidebar.success("✓ File uploaded successfully!")
+            # We'll parse this later to get symbols
+        else:
+            st.sidebar.info(
+                "📋 **Required columns:**\n"
+                "- Date (YYYY-MM-DD)\n"
+                "- Symbol (e.g., RELIANCE)\n"
+                "- Open, High, Low, Close\n"
+                "- Volume"
+            )
+            
+            # Create and offer sample template download
+            import io
+            
+            # Generate sample in memory
+            sample_buffer = io.BytesIO()
+            dates = pd.date_range('2023-01-01', '2023-01-10', freq='B')
+            sample_data = []
+            for symbol in ['RELIANCE', 'TCS']:
+                base_price = 2000 if symbol == 'RELIANCE' else 3500
+                for date in dates:
+                    sample_data.append({
+                        'Date': date,
+                        'Symbol': symbol,
+                        'Open': base_price + 10,
+                        'High': base_price + 20,
+                        'Low': base_price - 10,
+                        'Close': base_price + 5,
+                        'Volume': 1000000
+                    })
+            sample_df = pd.DataFrame(sample_data)
+            sample_df.to_excel(sample_buffer, index=False, engine='openpyxl')
+            sample_buffer.seek(0)
+            
+            st.sidebar.download_button(
+                label="📥 Download Sample Template",
+                data=sample_buffer,
+                file_name="sample_trading_data.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                help="Download a sample Excel file to see the required format"
+            )
+    
+    else:  # API/Mock Data
+        st.sidebar.markdown("### 📊 Select Stocks")
+        available_stocks = [
+            'RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'ICICIBANK',
+            'SBIN', 'BHARTIARTL', 'ITC', 'KOTAKBANK', 'LT'
+        ]
+        
+        selected_stocks = st.sidebar.multiselect(
+            "Choose stocks to analyze",
+            options=available_stocks,
+            default=['RELIANCE'],
+            help="Select 1-5 stocks for backtesting"
+        )
     
     # Date range
     st.sidebar.markdown("### 📅 Date Range")
@@ -220,21 +284,39 @@ if 'metrics' not in st.session_state:
 # Run backtest
 if run_backtest_button:
     if market_type == "Equity":
-        if not selected_stocks:
+        # Check if we have either selected stocks or uploaded file
+        if data_source == "API/Mock Data" and not selected_stocks:
             st.error("⚠️ Please select at least one stock!")
+        elif data_source == "Upload Excel" and uploaded_file is None:
+            st.error("⚠️ Please upload an Excel file!")
         else:
             with st.spinner('🔄 Fetching data and running backtest...'):
                 try:
-                    # Fetch data
+                    # Fetch data based on source
                     progress_bar = st.progress(0)
-                    st.info("📥 Fetching equity data...")
-                    progress_bar.progress(20)
                     
-                    raw_data = fetch_equity_data(
-                        selected_stocks,
-                        start_date.strftime('%Y-%m-%d'),
-                        end_date.strftime('%Y-%m-%d')
-                    )
+                    if data_source == "Upload Excel":
+                        # Load from uploaded file
+                        st.info("📂 Loading data from uploaded file...")
+                        progress_bar.progress(20)
+                        
+                        from data.excel_loader import load_excel_data
+                        raw_data = load_excel_data(uploaded_file.read())
+                        
+                        # Get symbols from uploaded data
+                        selected_stocks = raw_data['Symbol'].unique().tolist()
+                        st.info(f"📊 Found {len(selected_stocks)} symbol(s): {', '.join(selected_stocks)}")
+                        
+                    else:
+                        # Fetch from API/Mock
+                        st.info("📥 Fetching equity data...")
+                        progress_bar.progress(20)
+                        
+                        raw_data = fetch_equity_data(
+                            selected_stocks,
+                            start_date.strftime('%Y-%m-%d'),
+                            end_date.strftime('%Y-%m-%d')
+                        )
                     
                     # Preprocess
                     st.info("🧹 Preprocessing data...")
@@ -280,6 +362,12 @@ if run_backtest_button:
                     metrics = metrics_calc.calculate_all_metrics()
                     
                     progress_bar.progress(100)
+                    
+                    #Check if mock data was used (will have predictable patterns)
+                    if len(raw_data) > 0:
+                        # Check if this looks like mock data (Symbol column values)
+                        if hasattr(raw_data, 'attrs') and raw_data.attrs.get('is_mock_data'):
+                            st.warning("⚠️ **Using Mock Data**: The Hackathon API did not return data. Results are based on synthetic data for testing purposes only.")
                     
                     # Store in session state
                     st.session_state.backtest_results = results
