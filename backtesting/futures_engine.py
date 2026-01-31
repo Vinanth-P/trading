@@ -20,7 +20,8 @@ def run_futures_backtest(
     max_daily_losses=3,
     min_stop_points=10,
     risk_percent_bullish=0.02,
-    risk_percent_neutral=0.01
+    risk_percent_neutral=0.01,
+    custom_data=None
 ):
     """
     Run futures backtest with smart money concepts strategy.
@@ -32,12 +33,25 @@ def run_futures_backtest(
         min_stop_points: Minimum stop distance in points
         risk_percent_bullish: Risk per trade when biased (%)
         risk_percent_neutral: Risk per trade when neutral (%)
+        custom_data: Optional DataFrame with custom data (for Excel uploads)
         
     Returns:
         dict: Backtest results with trade history, portfolio history, and data
     """
     # Load data
-    df = load_futures_data()
+    if custom_data is not None:
+        # Use uploaded data
+        df = custom_data.copy()
+        # Ensure datetime index
+        if 'Date' in df.columns:
+            df['datetime'] = pd.to_datetime(df['Date'])
+            df = df.set_index('datetime')
+        # Ensure lowercase column names for consistency
+        df.columns = [col.lower() if col not in ['datetime', 'Date'] else col for col in df.columns]
+    else:
+        # Load default futures data
+        df = load_futures_data()
+    
     daily = get_daily_levels(df)
     
     # Initialize tracking

@@ -205,8 +205,71 @@ if market_type == "Equity":
 ) / 100
 
 else:  # Futures mode
+    # Data Source Selection for Futures
+    st.sidebar.markdown("### 📁 Data Source")
+    futures_data_source = st.sidebar.radio(
+        "Choose data source",
+        options=["Use Stored Data", "Upload Excel"],
+        horizontal=True,
+        help="Use pre-loaded NIFTY futures data or upload your own"
+    )
+    
+    futures_uploaded_file = None
+    
+    if futures_data_source == "Upload Excel":
+        st.sidebar.markdown("#### 📤 Upload Futures Data")
+        futures_uploaded_file = st.sidebar.file_uploader(
+            "Choose Excel file",
+            type=['xlsx', 'xls'],
+            help="Upload Excel file with NIFTY futures OHLCV data",
+            key="futures_upload"
+        )
+        
+        if futures_uploaded_file is not None:
+            st.sidebar.success("✓ File uploaded successfully!")
+        else:
+            st.sidebar.info(
+                "� **Required columns:**\n"
+                "- date/Date\n"
+                "- tradingsymbol/Symbol\n"
+                "- open, high, low, close\n"
+                "- volume\n"
+                "- time (optional)"
+            )
+            
+            # Sample template for futures
+            import io
+            sample_buffer = io.BytesIO()
+            dates = pd.date_range('2025-12-01', '2025-12-10', freq='B')
+            sample_data = []
+            base_price = 26000
+            for date in dates:
+                sample_data.append({
+                    'date': date,
+                    'time': '00:00:00',
+                    'tradingsymbol': 'NIFTY',
+                    'open': base_price + 10,
+                    'high': base_price + 50,
+                    'low': base_price - 30,
+                    'close': base_price + 20,
+                    'volume': 0
+                })
+            sample_df = pd.DataFrame(sample_data)
+            sample_df.to_excel(sample_buffer, index=False, engine='openpyxl')
+            sample_buffer.seek(0)
+            
+            st.sidebar.download_button(
+                label="📥 Download Futures Template",
+                data=sample_buffer,
+                file_name="sample_nifty_futures.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                help="Download a sample Excel file for NIFTY futures data"
+            )
+    else:
+        st.sidebar.info("📊 Using pre-loaded NIFTY futures data")
+    
+    st.sidebar.markdown("---")
     st.sidebar.markdown("### 🎯 Futures Trading")
-    st.sidebar.info("📊 Trading NIFTY Futures with Smart Money Concepts")
     
     # Strategy parameters for Futures
     st.sidebar.markdown("### 🎯 Strategy Parameters")
@@ -385,7 +448,21 @@ if run_backtest_button:
         with st.spinner('🔄 Loading futures data and running backtest...'):
             try:
                 progress_bar = st.progress(0)
-                st.info("📥 Loading futures data...")
+                
+                # Handle data source
+                futures_data = None
+                if futures_data_source == "Upload Excel" and futures_uploaded_file is not None:
+                    st.info("📂 Loading futures data from uploaded file...")
+                    progress_bar.progress(20)
+                    
+                    from data.excel_loader import load_excel_data
+                    futures_data = load_excel_data(futures_uploaded_file.read())
+                    
+                    symbols = futures_data['Symbol'].unique().tolist()
+                    st.info(f"📊 Found {len(futures_data)} records for: {', '.join(symbols)}")
+                else:
+                    st.info("📥 Loading pre-stored futures data...")
+                
                 progress_bar.progress(30)
                 
                 # Run futures backtest
@@ -398,7 +475,8 @@ if run_backtest_button:
                     max_daily_losses=max_daily_losses,
                     min_stop_points=min_stop_points,
                     risk_percent_bullish=risk_percent_bullish,
-                    risk_percent_neutral=risk_percent_neutral
+                    risk_percent_neutral=risk_percent_neutral,
+                    custom_data=futures_data
                 )
                 
                 # Calculate metrics for futures
