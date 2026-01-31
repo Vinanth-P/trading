@@ -78,8 +78,9 @@ Date        Symbol    Open     High     Low      Close    Volume
 The system recognizes these alternative names:
 
 - **Date**: `Date`, `DateTime`, `Timestamp`
-- **Symbol**: `Symbol`, `Stock`, `Ticker`
+- **Symbol**: `Symbol`, `Stock`, `Ticker`, `TradingSymbol`, `tradingsymbol`
 - **Volume**: `Volume`, `Vol`
+- **Time**: `time` column is optional and will be ignored if present
 
 ## Common Issues and Solutions
 

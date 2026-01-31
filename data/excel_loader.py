@@ -50,6 +50,8 @@ def load_excel_data(
             'symbol': 'Symbol',
             'stock': 'Symbol',
             'ticker': 'Symbol',
+            'tradingsymbol': 'Symbol',  # Support futures format
+            'trading_symbol': 'Symbol',
             'open': 'Open',
             'high': 'High',
             'low': 'Low',
@@ -82,6 +84,12 @@ def load_excel_data(
                 f"  - Symbol, Stock, or Ticker for symbol names\n"
                 f"  - Open, High, Low, Close, Volume (standard OHLCV)"
             )
+        
+        # Drop the 'time' column if present (not needed for daily data)
+        if 'time' in df.columns or 'Time' in df.columns:
+            time_cols = [col for col in df.columns if col.lower() == 'time']
+            df = df.drop(columns=time_cols)
+            print("ℹ️  Dropped 'time' column (not required for backtesting)")
         
         # Keep only required columns
         df = df[required_columns].copy()
